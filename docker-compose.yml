@@ -1,0 +1,69 @@
+# TODO: Docker Compose Configuration
+# This is a placeholder for future Docker deployment
+
+version: '3.8'
+
+services:
+  # Backend service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - SESSION_EXPIRE_HOURS=${SESSION_EXPIRE_HOURS}
+      - AGENT_MODEL=${AGENT_MODEL}
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - app-network
+    depends_on:
+      - db
+
+  # Frontend service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./frontend:/app
+    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+    networks:
+      - app-network
+    depends_on:
+      - backend
+
+  # Database (if using containerized SQL Server)
+  # Uncomment if you want to run SQL Server in Docker
+  # db:
+  #   image: mcr.microsoft.com/mssql/server:2022-latest
+  #   environment:
+  #     - ACCEPT_EULA=Y
+  #     - SA_PASSWORD=YourStrong@Password
+  #   ports:
+  #     - "1433:1433"
+  #   volumes:
+  #     - sqlserver-data:/var/opt/mssql
+  #   networks:
+  #     - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  sqlserver-data:
+
+# TODO: Create Dockerfiles for backend and frontend
+# TODO: Add health checks
+# TODO: Configure environment-specific settings
+# TODO: Add nginx reverse proxy for production
