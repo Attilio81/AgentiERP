@@ -66,7 +66,126 @@ La sezione **FAQ suggerite** genera automaticamente domande frequenti basate sul
 
 > ℹ️ Le FAQ vengono calcolate con un modello più leggero per offrire suggerimenti veloci e contestuali.
 
-## 5. Pannello Admin (solo utenti con username `admin`)
+## 5. Esempi pratici con l'agente "Magazzino"
+
+L'agente **Magazzino** è configurato con un prompt specializzato sulla gestione operativa delle giacenze. Lavora principalmente sulle viste:
+
+- `magazzino.giacenze`
+  - Colonne chiave: `CodiceAzienda`, `CodiceArticolo`, `CodiceMagazzino`, `NumeroLotto`, `Ubicazione`, `EsistenzaLotto`.
+- `magazzino.articoli`
+  - Colonne chiave: `CodiceArticolo`, `DescrizioneArticolo`, `UnitaMisuraBase`, `CodiceFamiglia`, `DescrizioneFamiglia`, `CodiceFornitore`, `RagioneSocialeFornitore`, `Ubicazione`.
+
+### 5.1 Che cosa fa l'agente Magazzino
+
+Quando fai una domanda all'agente Magazzino, lui:
+
+1. Analizza il testo della richiesta.
+2. Costruisce una query SQL **solo in lettura** usando il tool `sql_select`.
+3. Usa sempre gli schemi completi (`magazzino.giacenze`, `magazzino.articoli`).
+4. Somma le giacenze con `SUM(EsistenzaLotto)` raggruppando per `CodiceArticolo`.
+5. Esclude i lotti con `EsistenzaLotto = 0` (esauriti), salvo tu lo chieda esplicitamente.
+6. Restituisce una risposta sempre nel formato:
+   1. Tabella markdown (Codice, Descrizione, Giacenza, Ubicazione, UM...).
+   2. Spiegazione testuale (totali, medie, situazioni critiche).
+   3. Eventuali alert (es. giacenze negative, articolo non trovato).
+
+### 5.2 Esempi di domande utili
+
+Di seguito alcuni esempi che puoi letteralmente copiare/incollare nella chat quando sei sull'agente **Magazzino**.
+
+#### Esempio 1 – Giacenza di un singolo articolo
+
+> **Domanda:**
+> "Mostrami la giacenza disponibile per l'articolo `ABC123` nel magazzino principale."
+
+Cosa farà l'agente:
+
+- Userà `magazzino.giacenze` filtrando per `CodiceArticolo = 'ABC123'` e magazzino principale.
+- Calcolerà `Giacenza disponibile = SUM(EsistenzaLotto) WHERE EsistenzaLotto > 0`.
+- Aggregherà i lotti e aggiungerà le descrizioni da `magazzino.articoli`.
+- Ordinerà per giacenza decrescente.
+
+Esempio di output atteso:
+
+| Codice | Descrizione                | Giacenza | Ubicazioni              | UM |
+| ------ | -------------------------- | -------- | ----------------------- | -- |
+| ABC123 | Articolo di esempio 123   | 150      | MAG-01 / MAG-02 / MAG-3 | PZ |
+
+Interpretazione (testo sotto la tabella):
+
+> "Per l'articolo **ABC123** hai **150 pezzi disponibili** distribuiti su **3 ubicazioni** (MAG-01, MAG-02, MAG-3). Non risultano giacenze negative né lotti esauriti." 
+
+Se la somma risultasse 0, l'agente dovrebbe scrivere chiaramente qualcosa come:
+
+> "L'articolo **ABC123** risulta **ESAURITO** (giacenza totale = 0)."
+
+#### Esempio 2 – Articoli sotto scorta o critici
+
+> **Domanda:**
+> "Elenca gli articoli con giacenza molto bassa (meno di 10 pezzi) evidenziando quelli con giacenza zero come ESAURITI."
+
+Cosa farà l'agente:
+
+- Calcolerà la giacenza totale per articolo con `SUM(EsistenzaLotto)`.
+- Considererà come **ESAURITI** gli articoli con giacenza = 0.
+- Metterà in evidenza situazioni critiche (es. meno di 10 pezzi).
+
+Esempio di tabella:
+
+| Codice | Descrizione              | Giacenza | Stato       | Ubicazione principale |
+| ------ | ------------------------ | -------- | ----------- | ---------------------- |
+| XYZ001 | Articolo stagionale X    | 0        | ESAURITO    | MAG-01                 |
+| LMN050 | Ricambio critico LMN050  | 7        | BASSA SCORTA| MAG-02                 |
+
+Sotto la tabella l'agente dovrebbe spiegare:
+
+> "Hai **1 articolo esaurito** (XYZ001) e **1 articolo in bassa scorta** (LMN050 con 7 pezzi). Valuta un riordino urgente per LMN050."
+
+#### Esempio 3 – Giacenze per famiglia o fornitore
+
+> **Domanda:**
+> "Mostrami la giacenza aggregata per famiglia articolo, ordinata dalla più disponibile alla meno disponibile."
+
+Oppure:
+
+> **Domanda:**
+> "Per il fornitore `FORN001`, quali articoli ho a magazzino e con quanta giacenza?"
+
+L'agente sfrutterà le colonne di `magazzino.articoli` (`CodiceFamiglia`, `DescrizioneFamiglia`, `CodiceFornitore`, `RagioneSocialeFornitore`) per raggruppare e descrivere i dati.
+
+Esempio di output sintetico (per famiglia):
+
+| CodiceFamiglia | DescrizioneFamiglia    | GiacenzaTotale |
+| -------------- | ---------------------- | -------------- |
+| FAM001         | Ricambi critici        | 320            |
+| FAM002         | Prodotti finiti        | 180            |
+
+Interpretazione:
+
+> "La famiglia **Ricambi critici (FAM001)** è quella con maggiore disponibilità (320 pezzi totali), seguita dai **Prodotti finiti (FAM002)** con 180 pezzi."
+
+#### Esempio 4 – Ricerca per codice parziale
+
+> **Domanda:**
+> "Cerca tutti gli articoli che contengono 'FILTRO' nella descrizione e mostrami la giacenza disponibile."
+
+Se il codice o la descrizione fornita non esiste esattamente, l'agente può proporre alternative usando condizioni tipo `LIKE '%FILTRO%'`.
+
+Esempio di alert atteso:
+
+> "Non trovo l'articolo esatto richiesto, ma ho trovato questi articoli simili che contengono 'FILTRO' nella descrizione." 
+
+### 5.3 Come interpretare correttamente le risposte
+
+Quando usi l'agente Magazzino, verifica sempre:
+
+- **Colonne della tabella**: controlla che ci siano almeno Codice, Descrizione, Giacenza, Ubicazione, UM.
+- **Totali**: nelle note testuali dovresti trovare un riepilogo numerico (es. "150 pezzi totali", "3 ubicazioni").
+- **Alert**: presta attenzione a messaggi tipo "ESAURITO", "giacenza negativa", "ubicazione mancante".
+
+Se una risposta non rispetta questo formato (es. niente tabella, niente interpretazione testuale), segnala al team tecnico: potrebbe essere necessario affinare il prompt dell'agente o controllare la configurazione in Admin.
+
+## 6. Pannello Admin (solo utenti con username `admin`)
 
 1. Dalla sidebar della chat premi **"Apri pannello Admin"**.
 2. Seleziona un agente dalla lista.
@@ -78,7 +197,7 @@ La sezione **FAQ suggerite** genera automaticamente domande frequenti basate sul
 
 > ⚠️ Modifiche errate al prompt o ai tools possono impedire il funzionamento dell'agente. Documenta sempre gli aggiornamenti.
 
-## 6. Risoluzione problemi rapida
+## 7. Risoluzione problemi rapida
 
 | Problema | Possibile causa | Soluzione suggerita |
 | --- | --- | --- |
@@ -87,13 +206,13 @@ La sezione **FAQ suggerite** genera automaticamente domande frequenti basate sul
 | La chat restituisce errori SQL | Domanda ambigua o prompt non aggiornato | Riformula la richiesta con filtri precisi; se l'errore persiste, segnala al team admin |
 | FAQ non disponibili | Nessuna domanda recente o errore di rete | Premi "Genera/aggiorna FAQ"; se continua, controlla la connessione Internet |
 
-## 7. Buone pratiche
+## 8. Buone pratiche
 - Effettua il logout dopo ogni sessione condivisa.
 - Prima di modificare agenti o prompt, annota le variazioni (versioning manuale).
 - Se un'informazione è critica, valida i risultati confrontandoli con report ufficiali.
 - Segnala al team tecnico eventuali risposte incoerenti: potranno aggiornare prompt o rules.
 
-## 8. Supporto
+## 9. Supporto
 - Manuali tecnici aggiuntivi: `README.md`, `QUICKSTART.md`, `TROUBLESHOOTING.md`.
 - Email del team IT o canale interno di supporto.
 - In caso di anomalia critica, fornire screenshot, agente utilizzato, testo della domanda e orario.

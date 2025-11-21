@@ -1,26 +1,4 @@
-version: '3.8'
-
 services:
-  db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    restart: unless-stopped
-    environment:
-      ACCEPT_EULA: "Y"
-      SA_PASSWORD: ${SA_PASSWORD}
-      MSSQL_PID: "Express"
-    ports:
-      - "1433:1433"
-    volumes:
-      - sqlserver-data:/var/opt/mssql
-    healthcheck:
-      test:
-        ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${SA_PASSWORD}\" -Q 'SELECT 1' || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-    networks:
-      - app-network
-
   backend:
     build:
       context: ./backend
@@ -42,10 +20,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://frontend:8501}
     ports:
       - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    depends_on:
-      db:
-        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000    
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -60,7 +35,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      API_BASE_URL: ${BACKEND_URL:-http://backend:8000}
+      API_BASE_URL: http://backend:8000
     ports:
       - "8501:8501"
     command: >-
