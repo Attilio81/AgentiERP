@@ -1,60 +1,79 @@
-# TODO: Docker Compose Configuration
-# This is a placeholder for future Docker deployment
-
 version: '3.8'
 
 services:
-  # Backend service
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: ${SA_PASSWORD}
+      MSSQL_PID: "Express"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test:
+        ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${SA_PASSWORD}\" -Q 'SELECT 1' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - app-network
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      SESSION_EXPIRE_HOURS: ${SESSION_EXPIRE_HOURS:-24}
+      AGENT_MODEL: ${AGENT_MODEL}
+      FAQ_MODEL: ${FAQ_MODEL:-}
+      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://frontend:8501}
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - SECRET_KEY=${SECRET_KEY}
-      - SESSION_EXPIRE_HOURS=${SESSION_EXPIRE_HOURS}
-      - AGENT_MODEL=${AGENT_MODEL}
-    volumes:
-      - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - app-network
-    depends_on:
-      - db
 
-  # Frontend service
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: ${BACKEND_URL:-http://backend:8000}
     ports:
       - "8501:8501"
-    environment:
-      - BACKEND_URL=http://backend:8000
-    volumes:
-      - ./frontend:/app
-    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+    command: >-
+      streamlit run app.py
+      --server.port 8501
+      --server.address 0.0.0.0
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - app-network
-    depends_on:
-      - backend
-
-  # Database (if using containerized SQL Server)
-  # Uncomment if you want to run SQL Server in Docker
-  # db:
-  #   image: mcr.microsoft.com/mssql/server:2022-latest
-  #   environment:
-  #     - ACCEPT_EULA=Y
-  #     - SA_PASSWORD=YourStrong@Password
-  #   ports:
-  #     - "1433:1433"
-  #   volumes:
-  #     - sqlserver-data:/var/opt/mssql
-  #   networks:
-  #     - app-network
 
 networks:
   app-network:
@@ -62,8 +81,3 @@ networks:
 
 volumes:
   sqlserver-data:
-
-# TODO: Create Dockerfiles for backend and frontend
-# TODO: Add health checks
-# TODO: Configure environment-specific settings
-# TODO: Add nginx reverse proxy for production

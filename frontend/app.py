@@ -36,6 +36,8 @@ def init_session_state():
         st.session_state.pending_prompt = None
     if "faq_suggestions" not in st.session_state:
         st.session_state.faq_suggestions = {}
+    if "active_page" not in st.session_state:
+        st.session_state.active_page = "chat"
 
 
 def login_page():
@@ -350,70 +352,12 @@ def chat_page():
 
         if st.session_state.username == "admin":
             st.markdown("---")
-            st.subheader("Pannello Admin Agenti")
-            agents = get_admin_agents()
+            st.subheader("Pannello Admin")
+            st.caption("Gestisci gli agenti dal pannello dedicato.")
+            if st.button("Apri pannello Admin", key="open_admin_panel"):
+                st.session_state.active_page = "admin"
+                st.rerun()
 
-            if agents:
-                agent_names = [a["name"] for a in agents]
-                selected_agent_name = st.selectbox(
-                    "Seleziona agente",
-                    options=agent_names,
-                    key="admin_agent_select",
-                )
-
-                selected_agent = next(
-                    (a for a in agents if a["name"] == selected_agent_name),
-                    None,
-                )
-
-                if selected_agent is not None:
-                    desc_key = f"admin_agent_desc_{selected_agent['id']}"
-                    prompt_key = f"admin_agent_prompt_{selected_agent['id']}"
-                    active_key = f"admin_agent_active_{selected_agent['id']}"
-                    tools_key = f"admin_agent_tools_{selected_agent['id']}"
-
-                    new_description = st.text_input(
-                        "Descrizione",
-                        value=selected_agent.get("description") or "",
-                        key=desc_key,
-                    )
-                    new_prompt = st.text_area(
-                        "System prompt",
-                        value=selected_agent.get("system_prompt") or "",
-                        height=200,
-                        key=prompt_key,
-                    )
-                    new_active = st.checkbox(
-                        "Agente attivo",
-                        value=selected_agent.get("is_active", True),
-                        key=active_key,
-                    )
-                    new_tool_names = st.text_input(
-                        "Tools (nomi separati da virgola)",
-                        value=selected_agent.get("tool_names") or "",
-                        key=tools_key,
-                    )
-
-                    if st.button("Salva agente", key=f"admin_agent_save_{selected_agent['id']}"):
-                        payload = {
-                            "description": new_description,
-                            "system_prompt": new_prompt,
-                            "is_active": new_active,
-                            "tool_names": new_tool_names,
-                        }
-                        try:
-                            resp = requests.put(
-                                f"{API_BASE_URL}/api/admin/agents/{selected_agent['id']}",
-                                json=payload,
-                                headers={"X-Session-ID": st.session_state.session_id},
-                            )
-                            if resp.status_code == 200:
-                                st.success("Agente aggiornato con successo.")
-                            else:
-                                st.error("Errore durante l'aggiornamento dell'agente.")
-                        except Exception as e:
-                            st.error(f"Errore di connessione: {str(e)}")
-    
     # Main chat area
     st.title(f"💬 Chat con {st.session_state.current_agent.capitalize() if st.session_state.current_agent else 'Agente'}")
     
@@ -494,6 +438,124 @@ def chat_page():
                 st.error(f"Errore di connessione: {str(e)}")
 
 
+def admin_page():
+    """Render dedicated admin management dashboard."""
+    if st.session_state.username != "admin":
+        st.warning("Accesso riservato agli amministratori.")
+        if st.button("Torna alla chat", key="admin_back_to_chat"):
+            st.session_state.active_page = "chat"
+            st.rerun()
+        return
+
+    with st.sidebar:
+        st.title("🔐 Admin")
+        st.markdown(f"**Utente:** {st.session_state.username}")
+
+        if st.button("Torna alla chat", key="back_to_chat"):
+            st.session_state.active_page = "chat"
+            st.rerun()
+
+        if st.button("Logout", key="admin_logout"):
+            st.session_state.session_id = None
+            st.session_state.username = None
+            st.session_state.messages = []
+            st.session_state.active_page = "chat"
+            st.rerun()
+
+        st.markdown("---")
+        st.caption("Gestisci gli agenti, i prompt e gli strumenti consentiti.")
+
+    st.title("Pannello di amministrazione")
+    st.markdown(
+        """
+        Utilizza questa pagina per aggiornare le impostazioni degli agenti disponibili
+        nell'applicazione.
+        """
+    )
+
+    agents = get_admin_agents()
+
+    if not agents:
+        st.info("Nessun agente disponibile oppure impossibile recuperare i dati.")
+        if st.button("Riprova", key="reload_admin_agents"):
+            st.rerun()
+        return
+
+    agent_names = [a["name"] for a in agents]
+    selected_agent_name = st.selectbox(
+        "Seleziona un agente da modificare",
+        options=agent_names,
+    )
+
+    selected_agent = next((a for a in agents if a["name"] == selected_agent_name), None)
+
+    if selected_agent is None:
+        st.error("Agente non trovato.")
+        return
+
+    col_info, col_actions = st.columns([1, 2])
+    with col_info:
+        st.markdown("### Dettagli correnti")
+        st.json({
+            "ID": selected_agent.get("id"),
+            "Descrizione": selected_agent.get("description"),
+            "System prompt": selected_agent.get("system_prompt"),
+            "Attivo": selected_agent.get("is_active"),
+            "Tools": selected_agent.get("tool_names"),
+        })
+
+    with col_actions:
+        st.markdown("### Modifica agente")
+        form_key = f"admin_agent_form_{selected_agent['id']}"
+        with st.form(form_key):
+            new_description = st.text_input(
+                "Descrizione",
+                value=selected_agent.get("description") or "",
+            )
+            new_prompt = st.text_area(
+                "System prompt",
+                value=selected_agent.get("system_prompt") or "",
+                height=220,
+            )
+            new_active = st.checkbox(
+                "Agente attivo",
+                value=selected_agent.get("is_active", True),
+            )
+            new_tool_names = st.text_input(
+                "Tools (nomi separati da virgola)",
+                value=selected_agent.get("tool_names") or "",
+            )
+
+            submitted = st.form_submit_button("Salva modifiche")
+
+            if submitted:
+                payload = {
+                    "description": new_description,
+                    "system_prompt": new_prompt,
+                    "is_active": new_active,
+                    "tool_names": new_tool_names,
+                }
+                try:
+                    resp = requests.put(
+                        f"{API_BASE_URL}/api/admin/agents/{selected_agent['id']}",
+                        json=payload,
+                        headers={"X-Session-ID": st.session_state.session_id},
+                    )
+                    if resp.status_code == 200:
+                        st.success("Agente aggiornato con successo.")
+                        st.experimental_rerun()
+                    else:
+                        error_msg = resp.json().get("detail", "Errore durante l'aggiornamento dell'agente.")
+                        st.error(error_msg)
+                except Exception as e:
+                    st.error(f"Errore di connessione: {str(e)}")
+
+    st.markdown("---")
+    st.caption(
+        "Suggerimento: assicurati di mantenere sincronizzati prompt e tools con le funzionalità disponibili lato backend."
+    )
+
+
 def main():
     """Main application entry point."""
     init_session_state()
@@ -502,7 +564,12 @@ def main():
     if st.session_state.session_id is None:
         login_page()
     else:
-        chat_page()
+        active_page = st.session_state.get("active_page", "chat")
+        if active_page == "admin" and st.session_state.username == "admin":
+            admin_page()
+        else:
+            st.session_state.active_page = "chat"
+            chat_page()
 
 
 if __name__ == "__main__":
