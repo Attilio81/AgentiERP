@@ -102,6 +102,32 @@ END
 GO
 
 -- =====================================================
+-- Agents Table (Dynamic configuration for Datapizza Agents)
+-- =====================================================
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'chat_ai.agents') AND type = 'U')
+BEGIN
+    CREATE TABLE chat_ai.agents (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        name NVARCHAR(50) NOT NULL UNIQUE,
+        description NVARCHAR(200) NULL,
+        system_prompt NVARCHAR(MAX) NOT NULL,
+        model NVARCHAR(100) NULL,
+        db_uri NVARCHAR(500) NULL,
+        schema_name NVARCHAR(100) NULL,
+        is_active BIT DEFAULT 1 NOT NULL,
+        tool_names NVARCHAR(MAX) NULL,
+        created_at DATETIME2 DEFAULT GETDATE() NOT NULL,
+        updated_at DATETIME2 DEFAULT GETDATE() NOT NULL
+    );
+
+    CREATE INDEX idx_agents_name ON chat_ai.agents(name);
+    CREATE INDEX idx_agents_is_active ON chat_ai.agents(is_active);
+
+    PRINT 'Table chat_ai.agents created successfully';
+END
+GO
+
+-- =====================================================
 -- Stored Procedure: Cleanup Expired Sessions
 -- =====================================================
 IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'chat_ai.sp_cleanup_expired_sessions') AND type = 'P')

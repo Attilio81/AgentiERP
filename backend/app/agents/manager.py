@@ -3,12 +3,14 @@ Agent Manager using datapizza-ai framework.
 Gestisce agenti completamente configurati da database (chat_ai.agents).
 """
 from typing import Dict, List
+
 from datapizza.agents import Agent
-from app.agents.client_wrapper import RetryAnthropicClient
+
 from app.agents.sql_tools import create_sql_select_tool
 from app.config import Settings
 from app.database.database import SessionLocal
 from app.database.models import AgentConfig
+from app.llm.factory import LLMConfigurationError, build_llm_client
 
 
 class AgentManager:
@@ -25,12 +27,11 @@ class AgentManager:
         self.settings = settings
         self.agents: Dict[str, Agent] = {}
         
-        # Create Anthropic client (shared by all agents)
-        # Uses RetryAnthropicClient to handle 529 Overloaded errors
-        self.client = RetryAnthropicClient(
-            api_key=settings.anthropic_api_key,
-            model=settings.agent_model
-        )
+        # Create default LLM client (shared by agents unless overridden)
+        try:
+            self.default_client = build_llm_client(settings, use_case="agent")
+        except LLMConfigurationError as exc:  # pragma: no cover - startup failure
+            raise RuntimeError(f"Configurazione LLM non valida: {exc}") from exc
         
         # Initialize agents from DB configuration
         self._init_agents_from_db()
@@ -83,9 +84,24 @@ class AgentManager:
 
                 system_prompt = f"{base_prompt}{response_suffix}" if base_prompt else response_suffix
 
+                if db_agent.model:
+                    try:
+                        agent_client = build_llm_client(
+                            self.settings,
+                            use_case="agent",
+                            model_override=db_agent.model,
+                        )
+                    except LLMConfigurationError as exc:
+                        print(
+                            f"[AgentManager] Ignoro agente {db_agent.name}: {exc}"
+                        )
+                        continue
+                else:
+                    agent_client = self.default_client
+
                 self.agents[db_agent.name] = Agent(
                     name=db_agent.name,
-                    client=self.client,
+                    client=agent_client,
                     system_prompt=system_prompt,
                     tools=tools,
                 )

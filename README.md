@@ -36,8 +36,9 @@ Permette a utenti business di porre domande in italiano su dati aziendali, otten
                            │
                            ▼
                     ┌──────────────┐
-                    │   Claude     │
-                    │   (Anthropic)│
+                    │  LLM Client  │
+                    │ (Anthropic/  │
+                    │  OpenAI/Gem) │
                     └──────────────┘
 ```
 
@@ -72,8 +73,9 @@ Permette a utenti business di porre domande in italiano su dati aziendali, otten
 - **Database**: SQL Server (schema applicativo `chat_ai` + schemi di dominio personalizzati)
 - **Autenticazione**: Session-based, password hashate con `passlib[bcrypt]`
 - **AI**:
-  - Modello principale: `AGENT_MODEL` (es. Claude Sonnet 4.5)
-  - Modello FAQ: `FAQ_MODEL` (es. Claude Haiku 4.5) per generare domande frequenti leggere
+  - Provider selezionabile via `LLM_PROVIDER` (`anthropic`, `openai`, `gemini`)
+  - Modello principale: `AGENT_MODEL` (es. Claude Sonnet 4.5 / GPT‑4.1 / Gemini 1.5 Pro)
+  - Modello FAQ: `FAQ_MODEL` (es. Claude Haiku 4.5 / GPT‑4.1 mini / Gemini 1.5 Flash)
 - **Retry Logic**: Gestione automatica errori 529 Overloaded di Anthropic con backoff esponenziale
 
 ---
@@ -186,7 +188,10 @@ Apri `.env` e imposta i valori:
 
 ```env
 DATABASE_URL=mssql+pyodbc://user:password@server:1433/database?driver=ODBC+Driver+18+for+SQL+Server
+LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-your-api-key-here
+OPENAI_API_KEY=sk-openai-your-api-key-here
+GEMINI_API_KEY=sk-gemini-your-api-key-here
 
 SECRET_KEY=your-secret-key-here-minimum-32-characters
 SESSION_EXPIRE_HOURS=24
@@ -513,20 +518,14 @@ Vedi `QUICKSTART.md` e `TROUBLESHOOTING.md` per guide dettagliate.
 ### Problemi Comuni
 
 #### Backend non si avvia
-- Verifica virtualenv attivo: `.\venv\Scripts\Activate.ps1`
-- Controlla `backend/.env` (DATABASE_URL, ANTHROPIC_API_KEY, SECRET_KEY)
-- Verifica SQL Server raggiungibile
-
-#### Errore "Agent manager initialization failed"
-- Verifica tabella `chat_ai.agents` popolata (run `seed_agents.py`)
-- Controlla ANTHROPIC_API_KEY valida
-- Vedi logs backend per dettagli
+- Verifica virtualenv attivo: `.\
+```
 
 #### Agente non risponde o dà errori SQL
 - Verifica schema SQL configurato (`chat_ai.agents.schema_name`)
 - Controlla system_prompt menzioni tabelle/viste corrette
 - Usa Admin Panel per testare modifiche al prompt
-
+```
 #### Frontend non comunica con backend
 - Backend deve essere su `http://localhost:8000`
 - Verifica CORS in `backend/app/main.py`

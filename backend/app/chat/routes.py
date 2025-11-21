@@ -14,8 +14,8 @@ from app.database.database import get_db
 from app.database.models import Conversation, Message
 from app.auth.middleware import get_current_user
 from app.agents.manager import get_agent_manager
-from app.agents.client_wrapper import RetryAnthropicClient
 from app.config import get_settings
+from app.llm.factory import LLMConfigurationError, build_llm_client
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
@@ -274,12 +274,13 @@ def get_faq_suggestions(
     questions_block = "\n".join(questions_block_lines)
 
     settings = get_settings()
-    model_name = settings.faq_model or settings.agent_model
-
-    client = RetryAnthropicClient(
-        api_key=settings.anthropic_api_key,
-        model=model_name,
-    )
+    try:
+        client = build_llm_client(settings, use_case="faq")
+    except LLMConfigurationError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
 
     prompt = (
         f'Sei un assistente che genera FAQ in italiano per l\'agente "{agent_name}" '

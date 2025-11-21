@@ -2,8 +2,10 @@
 Application configuration using Pydantic Settings.
 Environment variables are loaded from .env file.
 """
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -12,10 +14,21 @@ class Settings(BaseSettings):
     # Database Configuration
     database_url: str
     
+    # LLM Provider Configuration
+    llm_provider: Literal["anthropic", "openai", "gemini"] = "anthropic"
+
     # Anthropic API Configuration
-    anthropic_api_key: str
-    agent_model: str = "claude-sonnet-4-5-20250929"
-    faq_model: str | None = None
+    anthropic_api_key: str | None = None
+
+    # OpenAI API Configuration
+    openai_api_key: str | None = None
+
+    # Google Gemini API Configuration
+    gemini_api_key: str | None = None
+
+    # Model configuration (heavy vs light)
+    agent_model: str | None = "claude-3-5-sonnet-20241022"
+    faq_model: str | None = "claude-3-5-haiku-20241022"
     
     # Security Configuration
     secret_key: str
