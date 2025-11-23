@@ -165,15 +165,45 @@ async def chat_stream(
 
             # Costruisci la lista di messaggi nel formato Datapizza:
             # [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+            #
+            # IMPORTANTE: L'API Anthropic richiede:
+            # 1. Messaggi che si alternano user/assistant/user/assistant
+            # 2. Ruoli validi: solo "user" e "assistant"
+            # 3. Contenuto non vuoto
             history = []
             for msg in previous_messages:
+                # Valida ruolo
+                if msg.role not in ("user", "assistant"):
+                    print(f"[WARN] Skipping message with invalid role: {msg.role}")
+                    continue
+
+                # Valida contenuto non vuoto
+                if not msg.content or not msg.content.strip():
+                    print(f"[WARN] Skipping message with empty content")
+                    continue
+
+                # Valida alternanza: se l'ultimo messaggio ha lo stesso ruolo, salta
+                if history and history[-1]["role"] == msg.role:
+                    print(f"[WARN] Skipping non-alternating {msg.role} message")
+                    continue
+
                 history.append({
                     "role": msg.role,
                     "content": msg.content
                 })
 
+            # Assicura che la conversazione inizi con "user"
+            if history and history[0]["role"] != "user":
+                print(f"[WARN] First message is not 'user', inserting placeholder")
+                history.insert(0, {
+                    "role": "user",
+                    "content": "[Contesto conversazione precedente]"
+                })
+
             # Log della dimensione dello storico (per debugging)
             print(f"[chat_stream] Conversation {conversation.id}: {len(history)} previous messages in history")
+            if history:
+                print(f"[DEBUG] Message roles: {[m['role'] for m in history]}")
 
             # ========================================
             # AGENT EXECUTION CON MEMORY
