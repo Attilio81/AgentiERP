@@ -262,6 +262,84 @@ sqlcmd -S your_server -d your_database -i backend/UPDATE_AGENTS_GET_SCHEMA.sql
 
 ---
 
+## 🧠 Memoria Conversazionale (v2.1)
+
+AgentiERP supporta **memoria conversazionale** usando la classe `Memory` di Datapizza-AI. Questo permette agli agenti di ricordare il contesto e supportare **domande di follow-up** senza dover ripetere informazioni.
+
+### Come Funziona
+
+**Implementazione tecnica:**
+
+```python
+# In backend/app/chat/routes.py
+from datapizza.memory import Memory
+from datapizza.type import ROLE, TextBlock
+
+# 1. Crea Memory instance per conversazione
+conversation_memory = Memory()
+
+# 2. Popola con cronologia dal database
+for msg in previous_messages:
+    role = ROLE.USER if msg.role == "user" else ROLE.ASSISTANT
+    conversation_memory.add_turn(TextBlock(content=msg.content), role=role)
+
+# 3. Imposta memory nell'agent prima della chiamata
+agent.memory = conversation_memory
+
+# 4. Esegui agent (legge memory internamente)
+result = await agent.a_run(user_message)
+```
+
+**IMPORTANTE**:
+- ❌ NON passare `memory` come parametro a `agent.a_run()` (causa errore "multiple values")
+- ✅ Imposta `agent.memory = conversation_memory` **prima** di chiamare `a_run()`
+
+### Esempio Pratico
+
+```
+User (msg 1): "Mostrami le giacenze dell'articolo ABC123"
+Agent: [tabella con 150 pz in MAG-01 e MAG-02]
+
+User (msg 2): "E nel magazzino secondario?"
+Agent: "Nel magazzino secondario (MAG-02) hai 45 pezzi di ABC123"
+      ↑ Ricorda ABC123 senza doverlo ripetere!
+
+User (msg 3): "Confronta con il mese scorso"
+Agent: "ABC123 aveva 60 pezzi a ottobre, ora 45 pezzi (-25%)"
+      ↑ Ricorda sia ABC123 che MAG-02!
+```
+
+### Benefici
+
+- ✅ **Analisi iterative**: Approfondisci senza ripetere contesto
+- ✅ **UX naturale**: Conversazione fluida come con un collega
+- ✅ **Efficienza**: Risparmi tempo non riformulando domande
+- ✅ **Raffinamenti progressivi**: "Concentrati solo sul Q1", "Escludi cliente X"
+
+### Gestione Memory
+
+**Nuova conversazione** → `agent.memory = Memory()` (vuota)
+**Follow-up** → `agent.memory = conversation_memory` (popolata)
+**Persistenza** → Memory è specifica per conversazione (non condivisa tra utenti)
+
+### Dettagli Tecnici
+
+- **Classe**: `datapizza.memory.Memory`
+- **Metodi chiave**:
+  - `add_turn(blocks, role)` - Aggiunge turno conversazione
+  - `__len__()` - Numero di turni
+  - `to_dict()` - Serializzazione
+- **Storage**: Messaggi salvati in `chat_ai.messages` (database)
+- **Scope**: Una Memory instance per conversazione
+- **Validazione**: Filtra messaggi con ruoli invalidi o contenuto vuoto
+
+Per approfondimenti implementativi, vedi:
+- `backend/app/chat/routes.py` (linee 166-255)
+- `FASE1_IMPROVEMENTS.md` - Documentazione completa Fase 1
+- [Datapizza Memory API](https://docs.datapizza.ai/0.0.9/API%20Reference/memory/)
+
+---
+
 ## 📂 Struttura del progetto
 
 ```text
