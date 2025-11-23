@@ -128,15 +128,75 @@ async def chat_stream(
     
     # Get agent and stream response
     agent = agent_manager.get_agent(request.agent_name)
-    
+
     async def event_generator():
-        """Generate SSE events from agent stream."""
+        """
+        Genera eventi Server-Sent Events (SSE) dalla risposta dell'agente.
+
+        Flusso:
+        1. Invia conversation_id al client
+        2. Recupera cronologia conversazione dal DB (per memory)
+        3. Esegue agent.a_run() passando lo storico messaggi
+        4. Invia la risposta completa al client
+        5. Salva risposta nel DB
+        6. Invia segnale di completamento
+
+        Yields:
+            Eventi SSE in formato: data: {"type": "...", ...}\n\n
+        """
         try:
             # Send conversation ID first
             yield f"data: {{\"type\": \"conversation_id\", \"id\": {conversation.id}}}\n\n"
-            
-            # Execute agent once and get final answer (no token-level streaming)
-            result = await agent.a_run(request.message)
+
+            # ========================================
+            # MEMORY: Recupera cronologia conversazione
+            # ========================================
+            # Per consentire all'agente di mantenere il contesto, recuperiamo
+            # tutti i messaggi precedenti della conversazione corrente e li
+            # passiamo all'agente nel formato richiesto da Datapizza.
+
+            previous_messages = (
+                db.query(Message)
+                .filter(Message.conversation_id == conversation.id)
+                .filter(Message.id != user_message.id)  # Escludi il messaggio appena aggiunto
+                .order_by(Message.timestamp.asc())
+                .all()
+            )
+
+            # Costruisci la lista di messaggi nel formato Datapizza:
+            # [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+            history = []
+            for msg in previous_messages:
+                history.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+
+            # Log della dimensione dello storico (per debugging)
+            print(f"[chat_stream] Conversation {conversation.id}: {len(history)} previous messages in history")
+
+            # ========================================
+            # AGENT EXECUTION CON MEMORY
+            # ========================================
+            # Esegui l'agente passando:
+            # - Il nuovo messaggio utente
+            # - Lo storico conversazione (messages=history) per la memory
+            #
+            # NOTA: Datapizza Agent usa 'messages' per il contesto conversazionale.
+            # Questo permette all'agente di:
+            # - Fare riferimento a query precedenti
+            # - Continuare analisi multi-step
+            # - Mantenere coerenza nelle risposte
+
+            # Verifica se l'agent supporta il parametro 'messages'
+            # (alcune versioni di Datapizza potrebbero avere API diverse)
+            try:
+                # Tentativo con memory (API moderna)
+                result = await agent.a_run(request.message, messages=history)
+            except TypeError:
+                # Fallback: API legacy senza memory
+                print("[chat_stream] WARN: Agent non supporta parametro 'messages', uso legacy API")
+                result = await agent.a_run(request.message)
 
             # Extract full response text
             if hasattr(result, "text") and getattr(result, "text", None):

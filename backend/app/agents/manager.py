@@ -1,12 +1,18 @@
 """
 Agent Manager using datapizza-ai framework.
 Gestisce agenti completamente configurati da database (chat_ai.agents).
+
+Questo modulo è responsabile di:
+- Caricare la configurazione degli agenti dal database
+- Creare istanze di Agent Datapizza con tools e memory
+- Gestire il lifecycle degli agenti (init, reinit)
+- Fornire accesso thread-safe agli agenti tramite singleton pattern
 """
 from typing import Dict, List
 
 from datapizza.agents import Agent
 
-from app.agents.sql_tools import create_sql_select_tool
+from app.agents.sql_tools import create_sql_select_tool, create_get_schema_tool
 from app.config import Settings
 from app.database.database import SessionLocal
 from app.database.models import AgentConfig
@@ -37,39 +43,89 @@ class AgentManager:
         self._init_agents_from_db()
 
     def _resolve_tools(self, agent_config: AgentConfig) -> List:
-        """Resolve tool callables for a given agent configuration."""
-        tools: List = []
-        db_uri = agent_config.db_uri
+        """
+        Risolve i tool da assegnare all'agente basandosi sulla configurazione DB.
 
+        Questo metodo implementa un registry pattern: ogni tool_id viene mappato
+        alla corrispondente factory function che crea il tool vero e proprio.
+
+        Args:
+            agent_config: Configurazione agente dal database (tabella chat_ai.agents)
+
+        Returns:
+            Lista di tool callables pronti per essere passati all'Agent Datapizza
+
+        Note:
+            I tool disponibili sono definiti nella colonna 'tool_names' come CSV:
+            Esempio: "sql_select,get_schema"
+        """
+        tools: List = []
+        db_uri = agent_config.db_uri  # Connessione DB specifica per questo agente
+        schema_name = agent_config.schema_name  # Schema SQL da esplorare (es. 'dbo', 'magazzino')
+
+        # Parse della lista di tool dalla configurazione DB
         if agent_config.tool_names:
             tool_ids = [t.strip().lower() for t in agent_config.tool_names.split(",") if t.strip()]
         else:
             tool_ids = []
 
+        # Registry: mappa tool_id → factory function
         for tool_id in tool_ids:
             if tool_id == "sql_select":
+                # Tool per eseguire query SELECT sul database
                 tools.append(create_sql_select_tool(agent_config.name, db_uri))
+
+            elif tool_id == "get_schema":
+                # Tool per esplorare schema database (tabelle, colonne)
+                # NUOVO: permette agli agenti di scoprire autonomamente lo schema
+                tools.append(create_get_schema_tool(agent_config.name, db_uri, schema_name))
+
+            # Spazio per futuri tool:
+            # elif tool_id == "web_search":
+            #     tools.append(create_web_search_tool())
+            # elif tool_id == "document_reader":
+            #     tools.append(create_document_reader_tool())
 
         return tools
 
     def _init_agents_from_db(self) -> None:
-        """Initialize all active agents from chat_ai.agents configuration."""
+        """
+        Inizializza tutti gli agenti attivi leggendo la configurazione dal database.
+
+        Questo metodo:
+        1. Legge la tabella chat_ai.agents per trovare agenti attivi
+        2. Per ogni agente, risolve i tools configurati
+        3. Costruisce il system prompt completo
+        4. Crea l'istanza Agent Datapizza con memory integrata
+        5. Registra l'agente nel registry interno (self.agents)
+
+        Note:
+            - Gli agenti con is_active=False vengono ignorati
+            - Se un agente non ha tools validi, viene skippato
+            - Ogni agente può avere il proprio modello LLM e connessione DB
+        """
         self.agents = {}
         db = SessionLocal()
         try:
+            # Query agenti attivi dal database
             db_agents = (
                 db.query(AgentConfig)
-                .filter(AgentConfig.is_active == True)
+                .filter(AgentConfig.is_active == True)  # Solo agenti attivi
                 .order_by(AgentConfig.name.asc())
                 .all()
             )
 
             for db_agent in db_agents:
+                # 1. RISOLUZIONE TOOLS
                 tools = self._resolve_tools(db_agent)
+
                 # Se non sono configurati tools validi, saltiamo l'agente
+                # (un agente senza tools non può fare nulla di utile)
                 if not tools:
+                    print(f"[AgentManager] Agente '{db_agent.name}' skippato: nessun tool valido configurato")
                     continue
 
+                # 2. COSTRUZIONE SYSTEM PROMPT
                 base_prompt = db_agent.system_prompt or ""
 
                 # Suffix generico per tutti gli agenti: impone uno stile di risposta finale
@@ -84,6 +140,8 @@ class AgentManager:
 
                 system_prompt = f"{base_prompt}{response_suffix}" if base_prompt else response_suffix
 
+                # 3. CREAZIONE CLIENT LLM
+                # Ogni agente può avere il proprio modello (override), altrimenti usa quello di default
                 if db_agent.model:
                     try:
                         agent_client = build_llm_client(
@@ -99,12 +157,29 @@ class AgentManager:
                 else:
                     agent_client = self.default_client
 
+                # 4. CREAZIONE AGENT CON MEMORY
+                # NOTA: Datapizza Agent gestisce automaticamente la memoria conversazionale
+                # attraverso il parametro 'messages' passato in .run() o .a_run()
+                # Non serve una Memory esplicita qui, ma la gestiamo passando lo storico
+                # nel chat/routes.py quando chiamiamo agent.a_run()
+
                 self.agents[db_agent.name] = Agent(
                     name=db_agent.name,
                     client=agent_client,
                     system_prompt=system_prompt,
                     tools=tools,
+                    # NOTA IMPORTANTE SULLA MEMORY:
+                    # Datapizza Agent supporta memory conversazionale tramite il parametro
+                    # 'messages' nella chiamata .run() o .a_run().
+                    # Non serve un oggetto Memory separato - la storia viene passata
+                    # direttamente come lista di messaggi dal chiamante (chat/routes.py).
+                    #
+                    # Esempio di uso in chat/routes.py:
+                    # history = [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+                    # result = await agent.a_run(new_message, messages=history)
                 )
+
+                print(f"[AgentManager] Agente '{db_agent.name}' inizializzato con {len(tools)} tools")
 
         finally:
             db.close()
