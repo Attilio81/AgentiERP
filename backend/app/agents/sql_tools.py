@@ -152,7 +152,19 @@ def execute_query(query: str, db_uri: Optional[str] = None) -> str:
 
 
 def create_sql_select_tool(agent_name: str, db_uri: Optional[str]) -> Any:
-    """Factory for a generic SELECT tool bound to an agent."""
+    """
+    Factory che crea un tool SQL SELECT personalizzato per uno specifico agente.
+
+    Questo pattern factory permette di creare tool isolati per ogni agente, ognuno
+    con la propria connessione al database configurata.
+
+    Args:
+        agent_name: Nome dell'agente (usato per naming del tool)
+        db_uri: URI connessione database. Se None, usa il database di default
+
+    Returns:
+        Tool function decorato con @tool di Datapizza, pronto per essere usato dall'Agent
+    """
 
     @tool
     def sql_select(query: str) -> str:
@@ -174,5 +186,149 @@ def create_sql_select_tool(agent_name: str, db_uri: Optional[str]) -> Any:
 
         return execute_query(query, db_uri=db_uri)
 
+    # Renaming dinamico del tool per facilitare il debug e il logging
     sql_select.__name__ = f"{agent_name}_sql_select"
     return sql_select
+
+
+def create_get_schema_tool(agent_name: str, db_uri: Optional[str], schema_name: Optional[str] = None) -> Any:
+    """
+    Factory che crea un tool per esplorare lo schema del database.
+
+    Questo tool permette agli agenti di scoprire autonomamente quali tabelle e colonne
+    sono disponibili, rendendo le risposte più accurate senza dover hardcodare
+    lo schema nel system prompt.
+
+    Args:
+        agent_name: Nome dell'agente (usato per naming del tool)
+        db_uri: URI connessione database. Se None, usa il database di default
+        schema_name: Nome dello schema SQL da esplorare (es. 'dbo', 'magazzino').
+                    Se None, esplora tutti gli schemi.
+
+    Returns:
+        Tool function che restituisce informazioni su tabelle e colonne
+
+    Example:
+        >>> tool = create_get_schema_tool("vendite", None, "dbo")
+        >>> result = tool("Clienti")
+        # Restituisce: struttura della tabella Clienti con nomi colonne e tipi
+    """
+
+    @tool
+    def get_schema(table_name: str = "") -> str:
+        """Ottieni informazioni sullo schema del database (tabelle, colonne, tipi di dati).
+
+        Questo strumento è fondamentale per capire quali dati sono disponibili prima
+        di scrivere una query SQL. Usalo SEMPRE quando non sei sicuro di quali
+        tabelle/colonne esistano.
+
+        Args:
+            table_name: Nome specifico di una tabella da ispezionare (opzionale).
+                       Se vuoto, restituisce tutte le tabelle disponibili.
+                       Esempi: "Clienti", "Ordini", "Prodotti"
+
+        Returns:
+            Informazioni strutturate su:
+            - Nomi delle tabelle disponibili (se table_name è vuoto)
+            - Colonne, tipi di dati, nullable per la tabella specifica (se table_name fornito)
+
+        Examples:
+            get_schema("")  # Lista tutte le tabelle
+            get_schema("Clienti")  # Mostra struttura tabella Clienti
+        """
+
+        # Query per ottenere informazioni sullo schema da INFORMATION_SCHEMA
+        # (standard SQL supportato da SQL Server)
+        if table_name.strip():
+            # Caso 1: Dettagli di una tabella specifica
+            query = """
+            SELECT
+                TABLE_SCHEMA,
+                TABLE_NAME,
+                COLUMN_NAME,
+                DATA_TYPE,
+                CHARACTER_MAXIMUM_LENGTH,
+                IS_NULLABLE,
+                COLUMN_DEFAULT
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = :table_name
+            """
+
+            # Filtra per schema se specificato
+            if schema_name:
+                query += " AND TABLE_SCHEMA = :schema_name"
+
+            query += " ORDER BY ORDINAL_POSITION"
+
+            # Esegui query parametrizzata (protezione SQL injection)
+            engine = _get_engine(db_uri)
+            Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            db = Session()
+
+            try:
+                params = {"table_name": table_name.strip()}
+                if schema_name:
+                    params["schema_name"] = schema_name
+
+                result = db.execute(
+                    text(query),
+                    params,
+                    execution_options={"timeout": settings.query_timeout_seconds}
+                )
+                rows = result.fetchall()
+
+                if not rows:
+                    return f"TABELLA NON TROVATA: '{table_name}'. Usa get_schema() senza parametri per vedere tutte le tabelle."
+
+                results: List[Dict[str, Any]] = [dict(row._mapping) for row in rows]
+                return format_results(results, max_rows=100)
+
+            except Exception as e:
+                return f"ERRORE durante il recupero dello schema: {str(e)}"
+            finally:
+                db.close()
+
+        else:
+            # Caso 2: Lista di tutte le tabelle disponibili
+            query = """
+            SELECT DISTINCT
+                TABLE_SCHEMA,
+                TABLE_NAME,
+                TABLE_TYPE
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW'
+            """
+
+            # Filtra per schema se specificato
+            if schema_name:
+                query += " AND TABLE_SCHEMA = :schema_name"
+
+            query += " ORDER BY TABLE_SCHEMA, TABLE_NAME"
+
+            engine = _get_engine(db_uri)
+            Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            db = Session()
+
+            try:
+                params = {"schema_name": schema_name} if schema_name else {}
+                result = db.execute(
+                    text(query),
+                    params,
+                    execution_options={"timeout": settings.query_timeout_seconds}
+                )
+                rows = result.fetchall()
+                results: List[Dict[str, Any]] = [dict(row._mapping) for row in rows]
+
+                if not results:
+                    return "Nessuna tabella trovata nello schema specificato."
+
+                return format_results(results, max_rows=100)
+
+            except Exception as e:
+                return f"ERRORE durante il recupero della lista tabelle: {str(e)}"
+            finally:
+                db.close()
+
+    # Renaming dinamico per debug
+    get_schema.__name__ = f"{agent_name}_get_schema"
+    return get_schema
