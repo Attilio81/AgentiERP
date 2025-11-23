@@ -187,12 +187,19 @@ async def chat_stream(
             # - Fare riferimento a query precedenti
             # - Continuare analisi multi-step
             # - Mantenere coerenza nelle risposte
+            #
+            # IMPORTANTE: Se non c'è cronologia (lista vuota), non passiamo il parametro
+            # 'messages' per evitare errori "at least one message is required" dall'API LLM.
 
             # Verifica se l'agent supporta il parametro 'messages'
             # (alcune versioni di Datapizza potrebbero avere API diverse)
             try:
-                # Tentativo con memory (API moderna)
-                result = await agent.a_run(request.message, messages=history)
+                # Tentativo con memory (API moderna) - solo se c'è cronologia
+                if history:
+                    result = await agent.a_run(request.message, messages=history)
+                else:
+                    # Nessuna cronologia: usa API semplice
+                    result = await agent.a_run(request.message)
             except TypeError:
                 # Fallback: API legacy senza memory
                 print("[chat_stream] WARN: Agent non supporta parametro 'messages', uso legacy API")
