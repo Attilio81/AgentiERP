@@ -223,13 +223,21 @@ async def chat_stream(
 
             # Verifica se l'agent supporta il parametro 'messages'
             # (alcune versioni di Datapizza potrebbero avere API diverse)
+            #
+            # ⚠️ TEMPORARY FIX: Memory disabled due to infinite loop issue
+            # When passing history with messages parameter, agent enters infinite
+            # reasoning loop (STEP 1, 2, 3, ... indefinitely).
+            # TODO: Investigate correct format for messages parameter in Datapizza
             try:
-                # Tentativo con memory (API moderna) - solo se c'è cronologia
-                if history:
-                    result = await agent.a_run(request.message, messages=history)
-                else:
-                    # Nessuna cronologia: usa API semplice
-                    result = await agent.a_run(request.message)
+                # MEMORY TEMPORANEAMENTE DISABILITATA
+                print(f"[chat_stream] WARN: Memory disabled (infinite loop fix), ignoring {len(history)} history messages")
+                result = await agent.a_run(request.message)
+
+                # CODICE ORIGINALE (causa loop infinito):
+                # if history:
+                #     result = await agent.a_run(request.message, messages=history)
+                # else:
+                #     result = await agent.a_run(request.message)
             except TypeError:
                 # Fallback: API legacy senza memory
                 print("[chat_stream] WARN: Agent non supporta parametro 'messages', uso legacy API")
