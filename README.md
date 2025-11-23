@@ -9,6 +9,8 @@ Permette a utenti business di porre domande in italiano su dati aziendali, otten
 ## 🎯 Caratteristiche principali
 
 - **Sistema agenti completamente dinamico**: Agenti configurabili via database e Admin Panel, senza modifiche al codice
+- **Memory conversazionale**: Gli agenti ricordano il contesto delle conversazioni precedenti per analisi multi-step
+- **Schema Discovery automatica**: Tool `get_schema` permette agli agenti di esplorare autonomamente il database
 - **Streaming in tempo reale**: Le risposte vengono mostrate mentre l'AI le genera
 - **Autenticazione a sessione**: Registrazione/login, sessioni con scadenza, password hashate
 - **Query SQL sicure**: Solo `SELECT`, validazione per bloccare comandi distruttivi
@@ -16,6 +18,7 @@ Permette a utenti business di porre domande in italiano su dati aziendali, otten
 - **Conversazioni recenti filtrate per agente**: La lista mostra solo le domande dell'agente selezionato
 - **FAQ suggerite per agente**: Lista di domande frequenti generate da un modello dedicato
 - **Pannello Admin Agenti**: Gestione completa di descrizione, system prompt, modello e tools degli agenti direttamente da UI
+- **I/O Tracing per debugging**: Logging dettagliato di tutte le chiamate LLM (configurabile)
 - **Architettura basata su Datapizza-AI**: Framework modulare per agenti production-ready
 
 ---
@@ -121,6 +124,144 @@ Workflow:
 
 ---
 
+## 🛠️ Tool Disponibili per gli Agenti
+
+Gli agenti possono utilizzare diversi **tool** (strumenti) per interagire con il database. I tool vengono assegnati via campo `tool_names` nella tabella `chat_ai.agents`.
+
+### 1. `sql_select` - Esecuzione Query SQL
+
+**Descrizione**: Permette all'agente di eseguire query SQL SELECT in sola lettura sul database configurato.
+
+**Caratteristiche**:
+- ✅ Solo query `SELECT` (lettura dati)
+- ✅ Validazione automatica contro comandi distruttivi (`INSERT`, `UPDATE`, `DELETE`, `DROP`, ecc.)
+- ✅ Timeout configurabile (default: 30 secondi)
+- ✅ Limit risultati (max 100 righe configurabile)
+- ✅ Output formattato come tabella ASCII leggibile
+
+**Esempio d'uso**:
+```
+User: "Dammi le vendite di gennaio 2025"
+Agent (internamente):
+  1. Decide di usare il tool sql_select
+  2. Genera query: SELECT SUM(Importo) FROM vendite.Ordini WHERE MONTH(Data) = 1 AND YEAR(Data) = 2025
+  3. Esegue la query
+  4. Riceve risultato: 125000.50
+  5. Risponde: "Le vendite di gennaio 2025 ammontano a €125.000,50"
+```
+
+**Configurazione agente**:
+```sql
+UPDATE chat_ai.agents
+SET tool_names = 'sql_select'
+WHERE name = 'vendite';
+```
+
+---
+
+### 2. `get_schema` - Esplorazione Schema Database (⭐ NUOVO)
+
+**Descrizione**: Permette all'agente di scoprire **autonomamente** quali tabelle e colonne sono disponibili nel database, senza dover hardcodare lo schema nel system prompt.
+
+**Caratteristiche**:
+- ✅ **Auto-discovery**: L'agente esplora il database in tempo reale
+- ✅ **Filtraggio per schema**: Se l'agente ha `schema_name` configurato, vede solo quelle tabelle
+- ✅ **Multi-tenant ready**: Ogni agente può esplorare schema diversi
+- ✅ **Informazioni complete**: Nome tabella, colonne, tipi di dati, nullable, valori default
+
+**Funzionalità**:
+
+1. **Lista tutte le tabelle** (chiamata senza parametri):
+   ```
+   User: "Quali tabelle hai a disposizione?"
+   Agent: get_schema("")
+
+   Risultato:
+   TABLE_SCHEMA | TABLE_NAME      | TABLE_TYPE
+   vendite      | Clienti         | BASE TABLE
+   vendite      | Ordini          | BASE TABLE
+   vendite      | Fatture         | BASE TABLE
+   vendite      | v_Top10Clienti  | VIEW
+   ```
+
+2. **Dettagli di una tabella specifica**:
+   ```
+   User: "Mostrami la struttura della tabella Ordini"
+   Agent: get_schema("Ordini")
+
+   Risultato:
+   TABLE_SCHEMA | TABLE_NAME | COLUMN_NAME  | DATA_TYPE | IS_NULLABLE | COLUMN_DEFAULT
+   vendite      | Ordini     | OrdineID     | int       | NO          | NULL
+   vendite      | Ordini     | ClienteID    | int       | YES         | NULL
+   vendite      | Ordini     | DataOrdine   | datetime2 | NO          | GETDATE()
+   vendite      | Ordini     | Importo      | decimal   | NO          | 0.00
+   ```
+
+**Filtraggio per schema**:
+```sql
+-- Agente "vendite" vede SOLO schema vendite
+UPDATE chat_ai.agents
+SET schema_name = 'vendite',
+    tool_names = 'sql_select,get_schema'
+WHERE name = 'vendite';
+
+-- Agente "magazzino" vede SOLO schema magazzino
+UPDATE chat_ai.agents
+SET schema_name = 'magazzino',
+    tool_names = 'sql_select,get_schema'
+WHERE name = 'magazzino';
+
+-- Agente "admin" vede TUTTO (nessun filtro)
+UPDATE chat_ai.agents
+SET schema_name = NULL,
+    tool_names = 'sql_select,get_schema'
+WHERE name = 'admin';
+```
+
+**Esempio workflow completo**:
+```
+User: "Dammi i clienti con più di 10 ordini"
+
+Agent (internamente):
+  1. Non conosco lo schema → uso get_schema("")
+  2. Vedo tabella "Clienti" e "Ordini" → uso get_schema("Ordini")
+  3. Scopro colonna "ClienteID" → uso get_schema("Clienti")
+  4. Ora so come fare il JOIN → uso sql_select:
+     SELECT c.Nome, COUNT(o.OrdineID) as NumOrdini
+     FROM vendite.Clienti c
+     JOIN vendite.Ordini o ON c.ClienteID = o.ClienteID
+     GROUP BY c.ClienteID, c.Nome
+     HAVING COUNT(o.OrdineID) > 10
+  5. Rispondo con i risultati
+```
+
+**Vantaggi**:
+- ✅ **Nessun hardcoding**: Non serve mettere nomi tabelle nel system prompt
+- ✅ **Flessibilità**: Funziona con qualsiasi database senza modifiche codice
+- ✅ **Accuratezza**: L'agente vede i tipi di dati reali (`VARCHAR(50)`, `INT`, `DECIMAL(10,2)`)
+- ✅ **Sicurezza**: Ogni agente vede solo il proprio schema (se configurato)
+
+**Abilitazione** (vedi `backend/UPDATE_AGENTS_GET_SCHEMA.sql`):
+```bash
+sqlcmd -S your_server -d your_database -i backend/UPDATE_AGENTS_GET_SCHEMA.sql
+```
+
+---
+
+### Tabella Riepilogativa Tool
+
+| Tool | Funzione | Output | Configurabile |
+|------|----------|--------|---------------|
+| `sql_select` | Esegue query SELECT | Tabella ASCII con risultati | Sì (timeout, max righe) |
+| `get_schema` | Esplora schema DB | Lista tabelle o dettagli colonne | Sì (filtra per schema_name) |
+
+**Tool in sviluppo** (roadmap):
+- `web_search` - Ricerca informazioni su internet (DuckDuckGo)
+- `document_reader` - Analisi PDF/DOCX
+- `export_csv` - Esporta risultati query in CSV
+
+---
+
 ## 📂 Struttura del progetto
 
 ```text
@@ -130,8 +271,8 @@ AgentiERP/
 │   │   ├── agents/           # Sistema agenti Datapizza
 │   │   │   ├── manager.py    # AgentManager: carica agenti da DB
 │   │   │   ├── prompts.py    # Template iniziali (non usati a runtime)
-│   │   │   ├── sql_tools.py  # Tool SQL factory dinamici
-│   │   │   └── client_wrapper.py  # Retry logic Anthropic
+│   │   │   ├── sql_tools.py  # Tool SQL factory (sql_select, get_schema)
+│   │   │   └── client_wrapper.py  # Retry logic + I/O Tracing Anthropic
 │   │   ├── admin/            # API pannello amministrazione agenti
 │   │   │   └── routes.py     # CRUD agenti + reinizializzazione
 │   │   ├── auth/             # Autenticazione e sessioni
@@ -139,21 +280,25 @@ AgentiERP/
 │   │   │   ├── session.py    # Session management
 │   │   │   └── middleware.py # Auth dependencies FastAPI
 │   │   ├── chat/             # Endpoints di chat e conversazioni
-│   │   │   └── routes.py     # SSE streaming + FAQ generation
+│   │   │   └── routes.py     # SSE streaming + FAQ + Memory
 │   │   ├── database/         # Connessione e modelli SQLAlchemy
 │   │   │   ├── database.py   # Engine e SessionLocal
 │   │   │   ├── models.py     # ORM models (User, Session, Conversation, Message, AgentConfig)
 │   │   │   └── init_schema.sql  # Schema SQL completo
-│   │   ├── config.py         # Configurazione (Settings)
+│   │   ├── llm/              # LLM client factory
+│   │   │   └── factory.py    # Multi-provider (Anthropic/OpenAI/Gemini)
+│   │   ├── config.py         # Configurazione (Settings + ENABLE_LLM_TRACING)
 │   │   └── main.py           # Entry point FastAPI
 │   ├── scripts/              # Utility scripts
 │   │   └── seed_agents.py    # Popola agenti di default da prompts.py
+│   ├── UPDATE_AGENTS_GET_SCHEMA.sql  # Script aggiunta tool get_schema
 │   ├── requirements.txt
 │   ├── test_setup.py         # Test rapido di setup
 │   └── test_retry_logic.py   # Test logica di retry Anthropic
 ├── frontend/
 │   ├── app.py                # UI Streamlit con Admin Panel
 │   └── requirements.txt
+├── FASE1_IMPROVEMENTS.md     # Documentazione Fase 1 (Memory, get_schema, I/O Tracing)
 ├── QUICKSTART.md             # Guida rapida
 ├── STATUS.md                 # Stato sistema e compatibilità Python 3.13
 ├── TROUBLESHOOTING.md        # Problemi comuni
@@ -198,6 +343,11 @@ SESSION_EXPIRE_HOURS=24
 
 AGENT_MODEL=claude-sonnet-4-5-20250929
 FAQ_MODEL=claude-haiku-4-5-20250929
+
+# Debugging & Observability
+# ENABLE_LLM_TRACING: Se True, logga tutti gli input/output delle chiamate LLM
+# ATTENZIONE: Genera log molto grandi! Utile per debugging ma disabilitare in produzione
+ENABLE_LLM_TRACING=False
 
 BACKEND_URL=http://localhost:8000
 FRONTEND_URL=http://localhost:8501
@@ -535,19 +685,30 @@ Vedi `QUICKSTART.md` e `TROUBLESHOOTING.md` per guide dettagliate.
 
 ## 📝 Roadmap / Miglioramenti futuri
 
+### ✅ Fase 1 - Quick Wins (COMPLETATA - Nov 2025)
+- [x] **Memory conversazionale**: Gli agenti ricordano il contesto delle conversazioni
+- [x] **Tool `get_schema`**: Auto-discovery di tabelle e colonne del database
+- [x] **I/O Tracing LLM**: Logging dettagliato input/output per debugging (`ENABLE_LLM_TRACING`)
+- [x] **Documentazione commentata**: ~725 righe di commenti Google-style aggiunte al codice
+
+📄 **Documentazione Fase 1**: Vedi `FASE1_IMPROVEMENTS.md` per dettagli completi
+
 ### Agenti Dinamici
 - [x] Configurazione database-driven
 - [x] Admin Panel per modifiche runtime
 - [x] Reinizializzazione automatica
-- [ ] Tool `get_schema` per auto-discovery tabelle
+- [x] Tool `get_schema` per auto-discovery tabelle
 - [ ] Versioning prompt (storico modifiche)
 - [ ] A/B testing UI (confronto agenti)
+- [ ] Tool `web_search` (DuckDuckGo)
+- [ ] Tool `document_reader` (PDF/DOCX)
 
 ### Sistema
 - [ ] Docker/Docker Compose production-ready
-- [ ] Test unitari e di integrazione
-- [ ] Logging strutturato (structlog)
-- [ ] Metriche e monitoring (Prometheus + Grafana)
+- [ ] Test unitari e di integrazione (pytest)
+- [ ] Logging strutturato (loguru/structlog)
+- [ ] OpenTelemetry tracing (Jaeger/Grafana)
+- [ ] Metriche e monitoring (Prometheus)
 - [ ] Cache query frequenti (Redis)
 - [ ] Rate limiting per utente
 - [ ] Export conversazioni
@@ -555,8 +716,10 @@ Vedi `QUICKSTART.md` e `TROUBLESHOOTING.md` per guide dettagliate.
 
 ### AI
 - [ ] Streaming token-level vero (non solo risposta finale)
-- [ ] Memory conversazionale (oltre messaggi singoli)
-- [ ] Function calling avanzato
+- [x] Memory conversazionale (cronologia passata a `agent.a_run()`)
+- [ ] RAG con chunking & embedding
+- [ ] Reranking risultati (Cohere)
+- [ ] ReAct pattern per reasoning multi-step
 - [ ] Multi-agent orchestration
 
 ---
@@ -576,6 +739,71 @@ Per problemi o domande:
 ---
 
 ## 🎓 Approfondimenti Tecnici
+
+### 🆕 Miglioramenti Fase 1 (Nov 2025)
+
+#### Memory Conversazionale
+
+Gli agenti ora mantengono il **contesto** delle conversazioni precedenti:
+
+```python
+# backend/app/chat/routes.py
+# Recupera cronologia dal database
+previous_messages = db.query(Message).filter(...).all()
+
+# Costruisci lista messaggi
+history = [{"role": msg.role, "content": msg.content} for msg in previous_messages]
+
+# Passa all'agente con memory
+result = await agent.a_run(request.message, messages=history)
+```
+
+**Beneficio**: Conversazioni multi-step naturali come "Vendite Q1?" → "E Q2?" → "Quale migliore?"
+
+#### Schema Discovery Tool
+
+Gli agenti esplorano autonomamente il database tramite `INFORMATION_SCHEMA`:
+
+```python
+# backend/app/agents/sql_tools.py
+@tool
+def get_schema(table_name: str = "") -> str:
+    """Ottieni info su tabelle e colonne del database."""
+    if table_name:
+        # Dettagli tabella specifica
+        query = "SELECT ... FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = :table_name"
+    else:
+        # Lista tutte le tabelle
+        query = "SELECT ... FROM INFORMATION_SCHEMA.TABLES ..."
+
+    # Filtra per schema_name se configurato
+    if schema_name:
+        query += " AND TABLE_SCHEMA = :schema_name"
+```
+
+**Beneficio**: Nessun hardcoding schemi nei prompt, funziona con qualsiasi database
+
+#### I/O Tracing per Debugging
+
+Logging completo input/output LLM configurabile da `.env`:
+
+```python
+# backend/app/agents/client_wrapper.py
+class RetryAnthropicClient(AnthropicClient):
+    def __init__(self, *args, trace_io: bool = False, **kwargs):
+        self.trace_io = trace_io
+
+    async def a_invoke(self, *args, **kwargs):
+        if self.trace_io:
+            self._log_io("INPUT", {...}, duration_ms)
+
+        result = await super().a_invoke(*args, **kwargs)
+
+        if self.trace_io:
+            self._log_io("OUTPUT", result, duration_ms)
+```
+
+**Beneficio**: Debug rapido di prompt che non funzionano, analisi latenza/costi
 
 ### Datapizza-AI Framework
 
@@ -618,5 +846,5 @@ Il progetto usa [Datapizza-AI](https://docs.datapizza.ai/), un framework Python 
 
 ---
 
-**Versione README:** 2.0 (Sistema Agenti Dinamico)  
-**Ultimo aggiornamento:** Novembre 2025
+**Versione README:** 2.1 (Fase 1 - Memory, Schema Discovery, I/O Tracing)
+**Ultimo aggiornamento:** 23 Novembre 2025
