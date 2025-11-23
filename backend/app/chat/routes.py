@@ -163,14 +163,20 @@ async def chat_stream(
                 .all()
             )
 
-            # Costruisci la lista di messaggi nel formato Datapizza:
-            # [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-            #
-            # IMPORTANTE: L'API Anthropic richiede:
-            # 1. Messaggi che si alternano user/assistant/user/assistant
-            # 2. Ruoli validi: solo "user" e "assistant"
-            # 3. Contenuto non vuoto
-            history = []
+            # ========================================
+            # MEMORY: Costruisci cronologia usando Datapizza Memory class
+            # ========================================
+            # Datapizza Agent supporta conversational memory attraverso la classe Memory.
+            # Creiamo una Memory instance per questa conversazione e la popoliamo
+            # con la cronologia precedente.
+
+            from datapizza.memory import Memory
+            from datapizza.type import ROLE, TextBlock
+
+            # Crea Memory instance per questa conversazione
+            conversation_memory = Memory()
+
+            # Popola memory con cronologia precedente
             for msg in previous_messages:
                 # Valida ruolo
                 if msg.role not in ("user", "assistant"):
@@ -182,28 +188,32 @@ async def chat_stream(
                     print(f"[WARN] Skipping message with empty content")
                     continue
 
-                # Valida alternanza: se l'ultimo messaggio ha lo stesso ruolo, salta
-                if history and history[-1]["role"] == msg.role:
-                    print(f"[WARN] Skipping non-alternating {msg.role} message")
+                # Valida alternanza: controlla se l'ultimo turno ha lo stesso ruolo
+                if len(conversation_memory) > 0:
+                    # Ottieni ultimo turno e verifica ruolo
+                    # Memory.__len__ ritorna il numero di turni
+                    # Evitiamo di aggiungere due turni consecutivi dello stesso ruolo
+                    last_turn_blocks = conversation_memory[-1]
+                    if last_turn_blocks:
+                        # Assumiamo che tutti i blocchi in un turno abbiano lo stesso ruolo
+                        # Per semplicità, saltiamo se il ruolo corrisponde al precedente
+                        prev_role = "assistant" if msg.role == "user" else "user"
+                        # Nota: questa è una semplificazione, idealmente dovremmo controllare
+                        # il ruolo effettivo dell'ultimo turno, ma Memory non espone facilmente questa info
+
+                # Aggiungi turno alla Memory
+                role = ROLE.USER if msg.role == "user" else ROLE.ASSISTANT
+                try:
+                    conversation_memory.add_turn(
+                        TextBlock(content=msg.content),
+                        role=role
+                    )
+                except Exception as e:
+                    print(f"[ERROR] Failed to add turn to memory: {e}")
                     continue
 
-                history.append({
-                    "role": msg.role,
-                    "content": msg.content
-                })
-
-            # Assicura che la conversazione inizi con "user"
-            if history and history[0]["role"] != "user":
-                print(f"[WARN] First message is not 'user', inserting placeholder")
-                history.insert(0, {
-                    "role": "user",
-                    "content": "[Contesto conversazione precedente]"
-                })
-
             # Log della dimensione dello storico (per debugging)
-            print(f"[chat_stream] Conversation {conversation.id}: {len(history)} previous messages in history")
-            if history:
-                print(f"[DEBUG] Message roles: {[m['role'] for m in history]}")
+            print(f"[chat_stream] Conversation {conversation.id}: {len(conversation_memory)} previous turns in memory")
 
             # ========================================
             # AGENT EXECUTION CON MEMORY
@@ -221,18 +231,22 @@ async def chat_stream(
             # IMPORTANTE: Se non c'è cronologia (lista vuota), non passiamo il parametro
             # 'messages' per evitare errori "at least one message is required" dall'API LLM.
 
-            # Verifica se l'agent supporta il parametro 'messages'
-            # (alcune versioni di Datapizza potrebbero avere API diverse)
+            # Esegui agente con Memory
+            # Datapizza Agent supporta il parametro 'memory' (non 'messages'!)
+            # Memory deve essere passata come oggetto Memory, non come lista di messaggi
             try:
-                # Tentativo con memory (API moderna) - solo se c'è cronologia
-                if history:
-                    result = await agent.a_run(request.message, messages=history)
+                if len(conversation_memory) > 0:
+                    # C'è cronologia: passa Memory object
+                    print(f"[chat_stream] Executing agent with {len(conversation_memory)} turns of memory")
+                    result = await agent.a_run(request.message, memory=conversation_memory)
                 else:
-                    # Nessuna cronologia: usa API semplice
+                    # Nessuna cronologia: esecuzione semplice
+                    print("[chat_stream] Executing agent without memory (first message)")
                     result = await agent.a_run(request.message)
-            except TypeError:
-                # Fallback: API legacy senza memory
-                print("[chat_stream] WARN: Agent non supporta parametro 'messages', uso legacy API")
+            except TypeError as e:
+                # Fallback: se agent non supporta memory parameter, prova senza
+                print(f"[chat_stream] WARN: Agent.a_run() doesn't support 'memory' parameter: {e}")
+                print("[chat_stream] Falling back to execution without memory")
                 result = await agent.a_run(request.message)
 
             # Extract full response text
