@@ -232,21 +232,26 @@ async def chat_stream(
             # 'messages' per evitare errori "at least one message is required" dall'API LLM.
 
             # Esegui agente con Memory
-            # Datapizza Agent supporta il parametro 'memory' (non 'messages'!)
-            # Memory deve essere passata come oggetto Memory, non come lista di messaggi
+            # IMPORTANTE: Non passare memory come parametro a a_run() (causa "multiple values" error)
+            # Invece, imposta agent.memory prima della chiamata
             try:
                 if len(conversation_memory) > 0:
-                    # C'è cronologia: passa Memory object
-                    print(f"[chat_stream] Executing agent with {len(conversation_memory)} turns of memory")
-                    result = await agent.a_run(request.message, memory=conversation_memory)
-                else:
-                    # Nessuna cronologia: esecuzione semplice
-                    print("[chat_stream] Executing agent without memory (first message)")
+                    # C'è cronologia: imposta memory nell'agent
+                    print(f"[chat_stream] Setting agent memory with {len(conversation_memory)} turns")
+                    agent.memory = conversation_memory
                     result = await agent.a_run(request.message)
-            except TypeError as e:
-                # Fallback: se agent non supporta memory parameter, prova senza
-                print(f"[chat_stream] WARN: Agent.a_run() doesn't support 'memory' parameter: {e}")
+                else:
+                    # Nessuna cronologia: azzera memory (se esiste)
+                    print("[chat_stream] Executing agent without memory (first message)")
+                    if hasattr(agent, 'memory'):
+                        agent.memory = Memory()  # Reset memory for new conversation
+                    result = await agent.a_run(request.message)
+            except Exception as e:
+                # Fallback completo
+                print(f"[chat_stream] ERROR during agent execution: {e}")
                 print("[chat_stream] Falling back to execution without memory")
+                if hasattr(agent, 'memory'):
+                    agent.memory = None
                 result = await agent.a_run(request.message)
 
             # Extract full response text
