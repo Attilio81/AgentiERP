@@ -11,6 +11,7 @@ Questo modulo è responsabile di:
 from typing import Dict, List
 
 from datapizza.agents import Agent
+from datapizza.tools.duckduckgo import DuckDuckGoSearchTool
 
 from app.agents.sql_tools import create_sql_select_tool, create_get_schema_tool
 from app.config import Settings
@@ -80,9 +81,11 @@ class AgentManager:
                 # NUOVO: permette agli agenti di scoprire autonomamente lo schema
                 tools.append(create_get_schema_tool(agent_config.name, db_uri, schema_name))
 
+            elif tool_id == "duckduckgo" or tool_id == "web_search":
+                # Tool per ricerca web (DuckDuckGo)
+                tools.append(DuckDuckGoSearchTool())
+
             # Spazio per futuri tool:
-            # elif tool_id == "web_search":
-            #     tools.append(create_web_search_tool())
             # elif tool_id == "document_reader":
             #     tools.append(create_document_reader_tool())
 
