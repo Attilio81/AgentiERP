@@ -546,97 +546,377 @@ def admin_page():
             st.rerun()
 
         st.markdown("---")
-        st.caption("Gestisci gli agenti, i prompt e gli strumenti consentiti.")
+        st.caption("Gestisci gli agenti, schedulazioni e strumenti consentiti.")
 
     st.title("Pannello di amministrazione")
-    st.markdown(
-        """
-        Utilizza questa pagina per aggiornare le impostazioni degli agenti disponibili
-        nell'applicazione.
-        """
-    )
 
-    agents = get_admin_agents()
+    # Tabs for different admin sections
+    tab1, tab2 = st.tabs(["Gestione Agenti", "📅 Schedulazioni"])
 
-    if not agents:
-        st.info("Nessun agente disponibile oppure impossibile recuperare i dati.")
-        if st.button("Riprova", key="reload_admin_agents"):
-            st.rerun()
-        return
+    # ========================================
+    # TAB 1: Agent Management
+    # ========================================
+    with tab1:
+        st.markdown(
+            """
+            Utilizza questa pagina per aggiornare le impostazioni degli agenti disponibili
+            nell'applicazione.
+            """
+        )
 
-    agent_names = [a["name"] for a in agents]
-    selected_agent_name = st.selectbox(
-        "Seleziona un agente da modificare",
-        options=agent_names,
-    )
+        agents = get_admin_agents()
 
-    selected_agent = next((a for a in agents if a["name"] == selected_agent_name), None)
+        if not agents:
+            st.info("Nessun agente disponibile oppure impossibile recuperare i dati.")
+            if st.button("Riprova", key="reload_admin_agents"):
+                st.rerun()
+            return
 
-    if selected_agent is None:
-        st.error("Agente non trovato.")
-        return
+        agent_names = [a["name"] for a in agents]
+        selected_agent_name = st.selectbox(
+            "Seleziona un agente da modificare",
+            options=agent_names,
+        )
 
-    col_info, col_actions = st.columns([1, 2])
-    with col_info:
-        st.markdown("### Dettagli correnti")
-        st.json({
-            "ID": selected_agent.get("id"),
-            "Descrizione": selected_agent.get("description"),
-            "System prompt": selected_agent.get("system_prompt"),
-            "Attivo": selected_agent.get("is_active"),
-            "Tools": selected_agent.get("tool_names"),
-        })
+        selected_agent = next((a for a in agents if a["name"] == selected_agent_name), None)
 
-    with col_actions:
-        st.markdown("### Modifica agente")
-        form_key = f"admin_agent_form_{selected_agent['id']}"
-        with st.form(form_key):
-            new_description = st.text_input(
-                "Descrizione",
-                value=selected_agent.get("description") or "",
-            )
-            new_prompt = st.text_area(
-                "System prompt",
-                value=selected_agent.get("system_prompt") or "",
-                height=220,
-            )
-            new_active = st.checkbox(
-                "Agente attivo",
-                value=selected_agent.get("is_active", True),
-            )
-            new_tool_names = st.text_input(
-                "Tools (nomi separati da virgola)",
-                value=selected_agent.get("tool_names") or "",
-            )
+        if selected_agent is None:
+            st.error("Agente non trovato.")
+            return
 
-            submitted = st.form_submit_button("Salva modifiche")
+        col_info, col_actions = st.columns([1, 2])
+        with col_info:
+            st.markdown("### Dettagli correnti")
+            st.json({
+                "ID": selected_agent.get("id"),
+                "Descrizione": selected_agent.get("description"),
+                "System prompt": selected_agent.get("system_prompt"),
+                "Attivo": selected_agent.get("is_active"),
+                "Tools": selected_agent.get("tool_names"),
+            })
 
-            if submitted:
-                payload = {
-                    "description": new_description,
-                    "system_prompt": new_prompt,
-                    "is_active": new_active,
-                    "tool_names": new_tool_names,
+        with col_actions:
+            st.markdown("### Modifica agente")
+            form_key = f"admin_agent_form_{selected_agent['id']}"
+            with st.form(form_key):
+                new_description = st.text_input(
+                    "Descrizione",
+                    value=selected_agent.get("description") or "",
+                )
+                new_prompt = st.text_area(
+                    "System prompt",
+                    value=selected_agent.get("system_prompt") or "",
+                    height=220,
+                )
+                new_active = st.checkbox(
+                    "Agente attivo",
+                    value=selected_agent.get("is_active", True),
+                )
+                new_tool_names = st.text_input(
+                    "Tools (nomi separati da virgola)",
+                    value=selected_agent.get("tool_names") or "",
+                )
+
+                submitted = st.form_submit_button("Salva modifiche")
+
+                if submitted:
+                    payload = {
+                        "description": new_description,
+                        "system_prompt": new_prompt,
+                        "is_active": new_active,
+                        "tool_names": new_tool_names,
+                    }
+                    try:
+                        resp = requests.put(
+                            f"{API_BASE_URL}/api/admin/agents/{selected_agent['id']}",
+                            json=payload,
+                            headers={"X-Session-ID": st.session_state.session_id},
+                        )
+                        if resp.status_code == 200:
+                            st.success("Agente aggiornato con successo.")
+                            st.rerun()
+                        else:
+                            error_msg = resp.json().get("detail", "Errore durante l'aggiornamento dell'agente.")
+                            st.error(error_msg)
+                    except Exception as e:
+                        st.error(f"Errore di connessione: {str(e)}")
+
+        st.markdown("---")
+        st.caption(
+            "Suggerimento: assicurati di mantenere sincronizzati prompt e tools con le funzionalità disponibili lato backend."
+        )
+
+    # ========================================
+    # TAB 2: Scheduled Tasks Management
+    # ========================================
+    with tab2:
+        st.markdown("### Schedulazioni Report Automatici")
+        st.caption("Configura l'esecuzione automatica di query e l'invio di report via email.")
+
+        # Get scheduled tasks
+        schedules = get_schedules()
+
+        # Show create button
+        col_btn1, col_btn2 = st.columns([1, 5])
+        with col_btn1:
+            if st.button("➕ Nuova Schedulazione", key="new_schedule_btn"):
+                st.session_state.schedule_action = "create"
+                st.rerun()
+        with col_btn2:
+            if st.button("🔄 Aggiorna", key="refresh_schedules"):
+                st.rerun()
+
+        # Create/Edit form
+        if st.session_state.get("schedule_action") in ["create", "edit"]:
+            action = st.session_state.schedule_action
+            schedule_id = st.session_state.get("edit_schedule_id")
+
+            st.markdown("---")
+            st.markdown(f"### {'Nuova' if action == 'create' else 'Modifica'} Schedulazione")
+
+            # Get existing data if editing
+            existing_data = {}
+            if action == "edit" and schedule_id:
+                existing_data = next((s for s in schedules if s["id"] == schedule_id), {})
+
+            with st.form("schedule_form"):
+                name = st.text_input(
+                    "Nome schedulazione *",
+                    value=existing_data.get("name", ""),
+                    placeholder="es. Report vendite mensile"
+                )
+
+                description = st.text_area(
+                    "Descrizione",
+                    value=existing_data.get("description", ""),
+                    placeholder="Descrizione opzionale della schedulazione"
+                )
+
+                # Agent selection
+                agent_list = get_agents()
+                agent_names = [a["name"] for a in agent_list]
+                current_agent = existing_data.get("agent_name", agent_names[0] if agent_names else "")
+                agent_idx = agent_names.index(current_agent) if current_agent in agent_names else 0
+
+                agent_name = st.selectbox(
+                    "Agente *",
+                    options=agent_names,
+                    index=agent_idx,
+                )
+
+                prompt = st.text_area(
+                    "Domanda/Query *",
+                    value=existing_data.get("prompt", ""),
+                    placeholder="es. Quali sono i prodotti più venduti nel mese precedente?",
+                    height=100
+                )
+
+                # Cron expression with presets
+                st.markdown("**Frequenza esecuzione ***")
+                freq_preset = st.selectbox(
+                    "Preset frequenza",
+                    options=[
+                        "Custom (cron expression)",
+                        "Ogni giorno alle 09:00",
+                        "Ogni lunedì alle 09:00",
+                        "Primo lunedì del mese alle 09:00",
+                        "Primo giorno del mese alle 09:00"
+                    ],
+                )
+
+                # Map presets to cron
+                cron_presets = {
+                    "Ogni giorno alle 09:00": "0 9 * * *",
+                    "Ogni lunedì alle 09:00": "0 9 * * 1",
+                    "Primo lunedì del mese alle 09:00": "0 9 * * 1#1",
+                    "Primo giorno del mese alle 09:00": "0 9 1 * *",
                 }
-                try:
-                    resp = requests.put(
-                        f"{API_BASE_URL}/api/admin/agents/{selected_agent['id']}",
-                        json=payload,
-                        headers={"X-Session-ID": st.session_state.session_id},
-                    )
-                    if resp.status_code == 200:
-                        st.success("Agente aggiornato con successo.")
-                        st.experimental_rerun()
-                    else:
-                        error_msg = resp.json().get("detail", "Errore durante l'aggiornamento dell'agente.")
-                        st.error(error_msg)
-                except Exception as e:
-                    st.error(f"Errore di connessione: {str(e)}")
 
-    st.markdown("---")
-    st.caption(
-        "Suggerimento: assicurati di mantenere sincronizzati prompt e tools con le funzionalità disponibili lato backend."
-    )
+                if freq_preset == "Custom (cron expression)":
+                    cron_expression = st.text_input(
+                        "Cron expression",
+                        value=existing_data.get("cron_expression", "0 9 * * *"),
+                        help="Formato: minuto ora giorno mese giorno_settimana"
+                    )
+                else:
+                    cron_expression = cron_presets[freq_preset]
+                    st.code(cron_expression, language="text")
+
+                # Email recipients
+                emails_str = existing_data.get("recipient_emails", [])
+                if isinstance(emails_str, list):
+                    emails_str = ", ".join(emails_str)
+
+                recipient_emails = st.text_input(
+                    "Email destinatari (separati da virgola) *",
+                    value=emails_str,
+                    placeholder="email1@example.com, email2@example.com"
+                )
+
+                is_active = st.checkbox(
+                    "Schedulazione attiva",
+                    value=existing_data.get("is_active", True)
+                )
+
+                col_submit, col_cancel = st.columns([1, 5])
+                with col_submit:
+                    submitted = st.form_submit_button("💾 Salva")
+                with col_cancel:
+                    if st.form_submit_button("❌ Annulla"):
+                        st.session_state.schedule_action = None
+                        st.rerun()
+
+                if submitted:
+                    # Validate
+                    if not name or not agent_name or not prompt or not recipient_emails:
+                        st.error("Compila tutti i campi obbligatori (*)")
+                    else:
+                        # Parse emails
+                        emails_list = [e.strip() for e in recipient_emails.split(",")]
+
+                        payload = {
+                            "name": name,
+                            "description": description,
+                            "agent_name": agent_name,
+                            "prompt": prompt,
+                            "cron_expression": cron_expression,
+                            "recipient_emails": emails_list,
+                            "is_active": is_active,
+                        }
+
+                        try:
+                            if action == "create":
+                                resp = create_schedule(payload)
+                            else:
+                                resp = update_schedule(schedule_id, payload)
+
+                            if resp:
+                                st.success(f"Schedulazione {'creata' if action == 'create' else 'aggiornata'} con successo!")
+                                st.session_state.schedule_action = None
+                                st.rerun()
+                            else:
+                                st.error("Errore durante il salvataggio.")
+                        except Exception as e:
+                            st.error(f"Errore: {str(e)}")
+
+        # Show schedules table
+        st.markdown("---")
+        st.markdown("### Schedulazioni Configurate")
+
+        if not schedules:
+            st.info("Nessuna schedulazione configurata. Clicca su '➕ Nuova Schedulazione' per iniziare.")
+        else:
+            for schedule in schedules:
+                with st.expander(
+                    f"{'✅' if schedule['is_active'] else '❌'} {schedule['name']} - {schedule['agent_name']}",
+                    expanded=False
+                ):
+                    col1, col2 = st.columns([2, 1])
+
+                    with col1:
+                        st.markdown(f"**Descrizione:** {schedule.get('description') or 'N/A'}")
+                        st.markdown(f"**Prompt:** {schedule['prompt']}")
+                        st.markdown(f"**Cron:** `{schedule['cron_expression']}`")
+                        st.markdown(f"**Email:** {', '.join(schedule['recipient_emails'])}")
+                        st.markdown(f"**Stato:** {'🟢 Attiva' if schedule['is_active'] else '🔴 Disattivata'}")
+                        
+                        if schedule.get("last_run_at"):
+                            st.markdown(f"**Ultima esecuzione:** {schedule['last_run_at']}")
+                            st.markdown(f"**Status:** {schedule.get('last_run_status', 'N/A')}")
+                            if schedule.get("last_run_error"):
+                                st.error(f"Errore: {schedule['last_run_error']}")
+                        
+                        if schedule.get("next_run_at"):
+                            st.markdown(f"**Prossima esecuzione:** {schedule['next_run_at']}")
+
+                    with col2:
+                        if st.button("✏️ Modifica", key=f"edit_{schedule['id']}"):
+                            st.session_state.schedule_action = "edit"
+                            st.session_state.edit_schedule_id = schedule['id']
+                            st.rerun()
+
+                        if st.button("🧪 Test", key=f"test_{schedule['id']}"):
+                            with st.spinner("Esecuzione test in corso..."):
+                                result = test_schedule(schedule['id'])
+                                if result:
+                                    if result.get("status") == "success":
+                                        st.success("Test completato con successo! Email inviata.")
+                                    else:
+                                        st.error(f"Test fallito: {result.get('error', 'Errore sconosciuto')}")
+                                    st.rerun()
+
+                        if st.button("🗑️ Elimina", key=f"delete_{schedule['id']}"):
+                            if delete_schedule(schedule['id']):
+                                st.success("Schedulazione eliminata.")
+                                st.rerun()
+                            else:
+                                st.error("Errore durante l'eliminazione")
+
+
+def get_schedules() -> List[Dict]:
+    """Get list of scheduled tasks."""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/api/admin/schedules",
+            headers={"X-Session-ID": st.session_state.session_id},
+        )
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except Exception:
+        return []
+
+
+def create_schedule(payload: Dict) -> bool:
+    """Create a new schedule."""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/api/admin/schedules",
+            json=payload,
+            headers={"X-Session-ID": st.session_state.session_id},
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def update_schedule(schedule_id: int, payload: Dict) -> bool:
+    """Update an existing schedule."""
+    try:
+        response = requests.put(
+            f"{API_BASE_URL}/api/admin/schedules/{schedule_id}",
+            json=payload,
+            headers={"X-Session-ID": st.session_state.session_id},
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def delete_schedule(schedule_id: int) -> bool:
+    """Delete a schedule."""
+    try:
+        response = requests.delete(
+            f"{API_BASE_URL}/api/admin/schedules/{schedule_id}",
+            headers={"X-Session-ID": st.session_state.session_id},
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def test_schedule(schedule_id: int) -> Optional[Dict]:
+    """Test a schedule manually."""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/api/admin/schedules/{schedule_id}/test",
+            headers={"X-Session-ID": st.session_state.session_id},
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception:
+        return None
 
 
 def main():

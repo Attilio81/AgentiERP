@@ -23,9 +23,48 @@ async def lifespan(app: FastAPI):
     init_agent_manager(settings)
     print("Agent manager initialized successfully.")
     
+    # Startup: Initialize and start scheduler
+    print("Initializing scheduler service...")
+    from app.services.scheduler_service import get_scheduler_service
+    from app.database.database import SessionLocal
+    from app.database.models import ScheduledTask
+    from app.admin.routes import execute_scheduled_task
+    import asyncio
+    
+    scheduler = get_scheduler_service()
+    scheduler.start()
+    
+    # Load active scheduled tasks from database
+    db = SessionLocal()
+    try:
+        active_tasks = db.query(ScheduledTask).filter(ScheduledTask.is_active == True).all()
+        print(f"Loading {len(active_tasks)} active scheduled task(s)...")
+        
+        for task in active_tasks:
+            def task_callback(task_id: int):
+                db_session = SessionLocal()
+                try:
+                    asyncio.run(execute_scheduled_task(task_id, db_session))
+                finally:
+                    db_session.close()
+            
+            scheduler.add_task(
+                task_id=str(task.id),
+                cron_expression=task.cron_expression,
+                callback=task_callback,
+                task_name=task.name,
+            )
+            print(f"  - Loaded task: {task.name} (cron: {task.cron_expression})")
+        
+        print("Scheduler service started successfully.")
+    finally:
+        db.close()
+    
     yield
     
-    # Shutdown: Cleanup if needed
+    # Shutdown: Stop scheduler and cleanup
+    print("Shutting down scheduler...")
+    scheduler.shutdown()
     print("Shutting down application...")
 
 

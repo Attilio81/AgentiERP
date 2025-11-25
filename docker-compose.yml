@@ -18,11 +18,18 @@ services:
       FAQ_MODEL: ${FAQ_MODEL:-}
       BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
       FRONTEND_URL: ${FRONTEND_URL:-http://frontend:8501}
+      # SMTP Configuration
+      SMTP_HOST: ${SMTP_HOST:-authsmtp.egmsistemi.it}
+      SMTP_PORT: ${SMTP_PORT:-25}
+      SMTP_USERNAME: ${SMTP_USERNAME:-smtp@egmsistemi.it}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-true}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-smtp@egmsistemi.it}
     ports:
       - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000    
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -39,14 +46,12 @@ services:
     ports:
       - "8501:8501"
     command: >-
-      streamlit run app.py
-      --server.port 8501
-      --server.address 0.0.0.0
+      streamlit run app.py --server.port 8501 --server.address 0.0.0.0
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" ]
       interval: 30s
       timeout: 10s
       retries: 5

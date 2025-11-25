@@ -11,3 +11,5 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 tenacity==8.5.0
 datapizza-ai-tools-duckduckgo
+APScheduler==3.10.4
+aiosmtplib==3.0.1

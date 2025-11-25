@@ -82,3 +82,28 @@ class AgentConfig(Base):
     schema_name = Column(String(100), nullable=True)
     is_active = Column(Boolean, server_default="1", nullable=False)
     tool_names = Column(Text, nullable=True)
+
+
+class ScheduledTask(Base):
+    """Scheduled task model for automated agent queries and reports."""
+    __tablename__ = "scheduled_tasks"
+    __table_args__ = {"schema": "chat_ai"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    description = Column(String(500), nullable=True)
+    agent_name = Column(String(50), nullable=False, index=True)
+    prompt = Column(Text, nullable=False)
+    cron_expression = Column(String(100), nullable=False)
+    recipient_emails = Column(Text, nullable=False)  # JSON array of email addresses
+    is_active = Column(Boolean, server_default="1", nullable=False, index=True)
+    last_run_at = Column(DateTime, nullable=True)
+    next_run_at = Column(DateTime, nullable=True, index=True)
+    last_run_status = Column(String(50), nullable=True)  # 'success', 'failed', 'pending'
+    last_run_error = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("chat_ai.users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.getdate(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.getdate(), onupdate=func.getdate(), nullable=False)
+
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_user_id])

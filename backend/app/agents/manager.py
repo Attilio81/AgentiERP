@@ -139,6 +139,7 @@ class AgentManager:
                     "- Dopo aver usato i tools, parla come se l'analisi fosse già stata eseguita.\n"
                     "- NON usare frasi come 'analizzerò', 'vado a verificare', 'interrogherò i dati'.\n"
                     "- Riassumi sempre cosa mostrano i risultati delle query, citando almeno 1-2 numeri o valori chiave.\n"
+                    "- Quando viene richiesto un TOP N, mostra TUTTI gli N elementi in formato tabella.\n"
                 )
 
                 system_prompt = f"{base_prompt}{response_suffix}" if base_prompt else response_suffix

@@ -241,28 +241,6 @@ Agent (internamente):
 - ✅ **Accuratezza**: L'agente vede i tipi di dati reali (`VARCHAR(50)`, `INT`, `DECIMAL(10,2)`)
 - ✅ **Sicurezza**: Ogni agente vede solo il proprio schema (se configurato)
 
-**Abilitazione** (vedi `backend/UPDATE_AGENTS_GET_SCHEMA.sql`):
-```bash
-sqlcmd -S your_server -d your_database -i backend/UPDATE_AGENTS_GET_SCHEMA.sql
-```
-
----
-
-### Tabella Riepilogativa Tool
-
-| Tool | Funzione | Output | Configurabile |
-|------|----------|--------|---------------|
-| `sql_select` | Esegue query SELECT | Tabella ASCII con risultati | Sì (timeout, max righe) |
-| `get_schema` | Esplora schema DB | Lista tabelle o dettagli colonne | Sì (filtra per schema_name) |
-
-**Tool in sviluppo** (roadmap):
-- `web_search` - Ricerca informazioni su internet (DuckDuckGo)
-- `document_reader` - Analisi PDF/DOCX
-- `export_csv` - Esporta risultati query in CSV
-
----
-
-## 📂 Struttura del progetto
 
 ```text
 AgentiERP/

@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     # ========================================
     max_query_results: int = 100  # Numero massimo righe restituite da query SQL
     query_timeout_seconds: int = 30  # Timeout query SQL
+
+    # ========================================
+    # SMTP EMAIL CONFIGURATION
+    # ========================================
+    smtp_host: str = "authsmtp.egmsistemi.it"
+    smtp_port: int = 25
+    smtp_username: str = "smtp@egmsistemi.it"
+    smtp_password: str  # Obbligatorio: password SMTP
+    smtp_use_ssl: bool = True
+    smtp_from_email: str = "smtp@egmsistemi.it"
     
     model_config = SettingsConfigDict(
         env_file=".env",

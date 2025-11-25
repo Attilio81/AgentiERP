@@ -146,16 +146,18 @@ L'agente esplora il database e scrive query accurate
 
 ### 🚀 Cosa Ci Distingue dalla Concorrenza
 
-| Funzionalità | AgentiERP v2.1 | Competitor Tipici |
+| Funzionalità | AgentiERP v2.2 | Competitor Tipici |
 |-------------|----------------|-------------------|
-| **Memoria conversazionale** | ✅ Follow-up senza ripetere contesto | ⚠️ Limitata o assente |
+| **Memoria conversazionale** | ✅ Follow-up senza ripetere contesto |  ⚠️ Limitata o assente |
 | **Schema discovery** | ✅ Esplorazione autonoma DB | ❌ Schema hardcodato in prompt |
+| **Web search integrato** | ✅ DuckDuckGo per dati esterni | ⚠️ Raro, spesso a pagamento |
+| **Report schedulati** | ✅ Email automatiche con cron avanzato | ⚠️ Solo in piani enterprise |
 | **Multi-agente** | ✅ Agenti specializzati per dominio | ⚠️ Singolo chatbot generico |
 | **Database-driven config** | ✅ Modifica agenti senza riavvio | ❌ Richiede deployment |
 | **Self-hosted** | ✅ Dati rimangono in azienda | ❌ Cloud obbligatorio (GDPR risk) |
 | **Admin Panel integrato** | ✅ Modifica prompt/tool da UI | ❌ Solo via codice |
 | **Multi-provider LLM** | ✅ Claude, GPT-4, custom | ⚠️ Locked-in su un provider |
-| **I/O Tracing** | ✅ Debug dettagliato (v2.1) | ❌ Black-box |
+| **I/O Tracing** |  ✅ Debug dettagliato (v2.1) | ❌ Black-box |
 | **Costo** | 💰 Solo API LLM pay-per-use | 💰💰 Subscription per utente |
 
 ---
@@ -299,15 +301,19 @@ L'agente esplora il database e scrive query accurate
 - ✅ I/O tracing per debugging
 - ✅ Admin panel per configurazione agenti
 
-#### **🚧 FASE 2 – IN SVILUPPO (Q1 2025)**
+#### **✅ FASE 2 – COMPLETATA (v2.2 - Novembre 2025)**
+- ✅ **🌐 Web Search integrato** (DuckDuckGo) - Confronto prezzi competitor, trend mercato
+- ✅ **📧 Report schedulati** - Email giornaliere/settimanali/mensili automatiche
+- ✅ **⏰ Cron avanzato** - "Primo lunedì del mese" e schedulazioni custom
+- ✅ **📊 Template email HTML** - Report professionali formattati
+
+#### **🚧 FASE 3 – IN SVILUPPO (Q1 2026)**
 - 📊 **Grafici dinamici** (Chart.js/Plotly integration)
 - 📄 **Export report** (Excel, PDF)
 - 🔍 **RAG su documentazione** (manuali tecnici, specifiche prodotto)
-- 🌐 **Web Search** integrato (confronto prezzi competitor, trend mercato)
 
-#### **📋 FASE 3 – PIANIFICATA (Q2 2025)**
+#### **📋 FASE 4 – PIANIFICATA (Q2 2026)**
 - 🤖 **Agenti proattivi** (alert automatici su KPI critici)
-- 📧 **Report schedulati** (email giornaliere/settimanali)
 - 🔗 **Integrazioni** (Slack, Teams, Telegram bot)
 - 🎨 **Dashboard builder** (trasforma conversazioni in dashboard persistenti)
 

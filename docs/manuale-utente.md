@@ -1,7 +1,30 @@
 # Manuale Utente – AgentiERP
-**Versione 2.1 – Novembre 2025**
+**Versione 2.2 – Novembre 2025**
 
 Questo manuale descrive le funzionalità principali dell'interfaccia Streamlit per gli utenti finali (business user e amministratori) del sistema AgentiERP.
+
+## Novità Versione 2.2 – Fase 2
+
+### 🌐 Ricerca Web (DuckDuckGo)
+Gli agenti possono ora cercare informazioni su internet quando i dati non sono disponibili nel database aziendale. Questo permette di:
+- Cercare informazioni su prodotti/aziende esterne
+- Confrontare prezzi e trend di mercato
+- Ottenere dati normativi o legislativi aggiornati
+- Integrare dati pubblici con analisi interne
+
+**Tool disponibile:** `web_search` / `duckduckgo`
+
+### 📅 Report Schedulati Automatici
+Gli amministratori possono ora configurare l'invio automatico di report via email secondo schedulazioni predefinite:
+- Esecuzione automatica di query agli agenti
+- Invio email con report HTML formattati
+- Schedulazioni flessibili (giornaliere, settimanali, mensili, custom)
+- Pannello UI dedicato nel tab Schedulazioni
+
+**Benefici:**
+- Report automatici senza intervento manuale
+- Aggiornamenti regolari per stakeholder
+- Supporto "primo lunedì del mese" e altre schedulazioni avanzate
 
 ## Novità Versione 2.1 – Fase 1
 
@@ -361,15 +384,85 @@ Gli amministratori possono abilitare il **tracing dettagliato** di tutte le chia
 **Esempio di log I/O:**
 ```
 ================================================================================
-[2025-11-23 14:32:15.123] [I/O TRACE] REQUEST
-[MODEL] claude-sonnet-4-5-20250929
-[SYSTEM] Sei un agente SQL che analizza il magazzino...
-[USER] Mostrami le giacenze di ABC123
-================================================================================
 [2025-11-23 14:32:16.847] [I/O TRACE] RESPONSE
 [LATENCY] 1724.53ms
 [CONTENT] Per l'articolo ABC123 ho trovato una giacenza di 150 pezzi...
 ```
+
+### 6.2 Schedulazioni Report (NOVITÀ 2.2)
+
+Gli amministratori possono configurare report automatici che vengono eseguiti secondo schedulazioni predefinite e inviati via email.
+
+**Come accedere:**
+1. Login come utente `admin`
+2. Apri pannello Admin
+3. Seleziona tab **"📅 Schedulazioni"**
+
+**Operazioni disponibili:**
+
+#### Creazione nuova schedulazione
+
+1. Click su **"➕ Nuova Schedulazione"**
+2. Compila il form:
+   - **Nome**: Identificativo descrittivo (es. "Report Vendite Mensile")
+   - **Descrizione**: Opzionale, dettagli aggiuntivi
+   - **Agente**: Seleziona l'agente da utilizzare
+   - **Domanda/Query**: La domanda che verrà posta all'agente
+   - **Frequenza**: Scegli tra preset o cron expression custom
+   - **Email destinatari**: Indirizzi separati da virgola
+   - **Schedulazione attiva**: Checkbox per abilitare/disabilitare
+
+3. Click su **"💾 Salva"**
+
+**Preset frequenza disponibili:**
+- Ogni giorno alle 09:00
+- Ogni lunedì alle 09:00
+- **Primo lunedì del mese alle 09:00** (utile per report mensili)
+- Primo giorno del mese alle 09:00
+- Custom (cron expression manuale)
+
+**Esempio configurazione:**
+```
+Nome: Report Top 10 Prodotti
+Agente: vendite
+Prompt: Mi dici i top 10 articoli venduti dal inizio mese?
+Frequenza: Primo lunedì del mese alle 09:00
+Email: direzione@azienda.com, commerciale@azienda.com
+```
+
+#### Test schedulazione
+
+Prima di attivare una schedulazione, puoi testarla:
+1. Trova la schedulazione nell'elenco
+2. Click su **"🧪 Test"**
+3. Il sistema esegue immediatamente la query e invia l'email
+4. Verifica che il report sia corretto prima di attivarlo
+
+#### Monitoraggio esecuzioni
+
+Ogni schedulazione mostra:
+- **Ultima esecuzione**: Data e ora
+- **Status**: success / failed / pending
+- **Prossima esecuzione**: Calcolata automaticamente
+- **Errore**: Dettagli se l'esecuzione è fallita
+
+**Best practices:**
+- ✅ Usa descrizioni chiare per identificare rapidamente le schedulazioni
+- ✅ Testa sempre con button "Test" prima di attivare
+- ✅ Verifica che gli indirizzi email siano corretti
+- ✅ Per report mensili, usa "primo lunedì del mese" invece di "giorno 1" (evita weekend)
+- ⚠️ Non schedulare troppe query contemporaneamente (max 5-10 in parallelo)
+- ⚠️ Monitora regolarmente lo status delle esecuzioni per individuare errori
+
+**Formato email inviata:**
+I report vengono inviati come email HTML professionali con:
+- Header con nome schedulazione
+- Informazioni agente e data esecuzione
+- Domanda eseguita
+- Risposta completa dell'agente con tabelle formattate
+- Footer informativo
+
+
 
 ## 7. Risoluzione problemi rapida
 
@@ -419,9 +512,16 @@ Gli amministratori possono abilitare il **tracing dettagliato** di tutte le chia
 
 ---
 
-## Changelog Versione 2.1
+## Changelog
 
-### Nuove Funzionalità (Fase 1)
+### Versione 2.2 (Novembre 2025) – Fase 2
+- 🌐 **Ricerca Web (DuckDuckGo)**: Tool `web_search` per cercare informazioni esterne
+- 📅 **Report Schedulati**: Configurazione invio automatico report via email
+- 📧 **Email Service**: Template HTML professionali per report
+- ⏰ **Supporto Cron Avanzato**: "Primo lunedì del mese" e altre schedulazioni custom
+- 🎯 **Test Schedulazioni**: Pulsante test per esecuzione immediata prima dell'attivazione
+
+### Versione 2.1 (Novembre 2025) – Fase 1
 - 🧠 **Memoria conversazionale**: Gli agenti ricordano la cronologia e supportano domande di follow-up
 - 🔍 **Schema discovery** (tool `get_schema`): Esplorazione autonoma della struttura database
 - 📊 **I/O Tracing**: Logging dettagliato chiamate LLM per debugging (solo admin)
