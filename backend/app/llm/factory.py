@@ -117,6 +117,7 @@ def build_llm_client(
         return RetryAnthropicClient(
             api_key=settings.anthropic_api_key,
             model=model_name,
+            temperature=settings.llm_temperature,  # Temperatura configurabile da .env
             trace_io=settings.enable_llm_tracing,  # NUOVO: I/O tracing configurabile
         )
 

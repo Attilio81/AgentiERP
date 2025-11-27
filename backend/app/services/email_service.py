@@ -210,7 +210,8 @@ class EmailService:
 
     def _markdown_to_html(self, text: str) -> str:
         """
-        Convert markdown-style tables and formatting to HTML.
+        Convert markdown to HTML using markdown2 library.
+        Supporta: headers, lists, tables, bold, italic, code, links, emoji.
 
         Args:
             text: Markdown text
@@ -218,38 +219,39 @@ class EmailService:
         Returns:
             HTML formatted text
         """
-        import re
-
-        lines = text.split("\n")
-        html_lines = []
-        in_table = False
-        table_rows = []
-
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-
-            # Detect markdown table
-            if stripped.startswith("|") and "|" in stripped[1:]:
-                if not in_table:
-                    in_table = True
-                    table_rows = []
-
-                # Skip separator line (| --- | --- |)
-                if i > 0 and set(stripped.replace("|", "").strip()) <= set("- :"):
-                    continue
-
-                # Parse table row
-                cells = [cell.strip() for cell in stripped.strip("|").split("|")]
-                table_rows.append(cells)
-
-            else:
-                # If we were in a table, render it
-                if in_table:
-                    html_lines.append(self._render_table(table_rows))
-                    table_rows = []
-                    in_table = False
-
-                # Regular text formatting
+        try:
+            import markdown2
+            
+            # Extras per supportare tabelle, code blocks, ecc.
+            html = markdown2.markdown(
+                text,
+                extras=[
+                    "tables",           # Tabelle markdown
+                    "fenced-code-blocks",  # Code blocks ```
+                    "break-on-newline", # Newline → <br>
+                    "cuddled-lists",   # Liste senza spaziatura extra
+                ]
+            )
+            
+            # Aggiungi stile inline per alcuni elementi
+            # (alcuni client email non supportano CSS esterni)
+            html = html.replace('<h1>', '<h1 style="color: #2E7D32; margin-top: 20px;">')
+            html = html.replace('<h2>', '<h2 style="color: #388E3C; margin-top: 15px;">')
+            html = html.replace('<h3>', '<h3 style="color: #4CAF50; margin-top: 10px;">')
+            html = html.replace('<code>', '<code style="background-color: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: monospace;">')
+            html = html.replace('<ul>', '<ul style="margin: 10px 0; padding-left: 25px;">')
+            html = html.replace('<ol>', '<ol style="margin: 10px 0; padding-left: 25px;">')
+            
+            return html
+            
+        except ImportError:
+            # Fallback: se markdown2 non è installato, usa il vecchio parser
+            import re
+            lines = text.split("\n")
+            html_lines = []
+            
+            for line in lines:
+                stripped = line.strip()
                 if stripped:
                     # Bold
                     line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
@@ -257,16 +259,11 @@ class EmailService:
                     line = re.sub(r'\*(.+?)\*', r'<em>\1</em>', line)
                     # Code
                     line = re.sub(r'`(.+?)`', r'<code>\1</code>', line)
-
                     html_lines.append(f"<p>{line}</p>")
                 else:
                     html_lines.append("<br>")
-
-        # Render final table if still in table mode
-        if in_table and table_rows:
-            html_lines.append(self._render_table(table_rows))
-
-        return "\n".join(html_lines)
+            
+            return "\n".join(html_lines)
 
     def _render_table(self, rows: List[List[str]]) -> str:
         """

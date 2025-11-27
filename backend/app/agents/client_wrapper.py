@@ -44,15 +44,17 @@ class RetryAnthropicClient(AnthropicClient):
         [2025-11-23 10:30:46] [I/O TRACE] OUTPUT: "Hello! How can I help you?"
     """
 
-    def __init__(self, *args, trace_io: bool = False, **kwargs):
+    def __init__(self, *args, trace_io: bool = False, temperature: float = 1.0, **kwargs):
         """
         Inizializza il client con opzioni retry e tracing.
 
         Args:
             trace_io: Abilita logging dettagliato I/O (default: False)
                      ATTENZIONE: in produzione può generare log molto grandi
+            temperature: Temperatura LLM (0.0-1.0, default: 1.0)
+                        0.0 = risposte deterministiche, 1.0 = risposte creative
         """
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, temperature=temperature, **kwargs)
         self.trace_io = trace_io  # Flag per abilitare/disabilitare I/O tracing
 
     def _log_io(self, direction: str, data: Any, duration_ms: float = None):

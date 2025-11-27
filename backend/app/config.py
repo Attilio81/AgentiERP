@@ -41,8 +41,16 @@ class Settings(BaseSettings):
     # MODEL CONFIGURATION
     # ========================================
     # Model configuration (heavy vs light)
-    agent_model: str | None = "claude-3-5-sonnet-20241022"  # Modello per agenti (analisi complesse)
-    faq_model: str | None = "claude-3-5-haiku-20241022"    # Modello per FAQ (più economico)
+    # Modelli Anthropic disponibili:
+    # - claude-sonnet-4-20250514 (Claude 4 Sonnet - più recente)
+    # - claude-3-5-sonnet-20241022 (Claude 3.5 Sonnet)
+    # - claude-3-5-haiku-20241022 (Claude 3.5 Haiku - più economico)
+    agent_model: str | None = "claude-sonnet-4-20250514"  # Modello per agenti (analisi complesse)
+    faq_model: str | None = "claude-3-5-haiku-20241022"   # Modello per FAQ (più economico)
+    
+    # Temperature LLM (0.0 = deterministico, 1.0 = creativo)
+    # Per analisi SQL si consiglia 0.3-0.5 per risposte più consistenti
+    llm_temperature: float = 0.3
 
     # ========================================
     # DEBUGGING & OBSERVABILITY
