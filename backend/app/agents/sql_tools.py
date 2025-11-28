@@ -241,21 +241,28 @@ def create_get_schema_tool(agent_name: str, db_uri: Optional[str], schema_name: 
         # (standard SQL supportato da SQL Server)
         if table_name.strip():
             # Caso 1: Dettagli di una tabella specifica
+            # Gestisce sia "tabella" che "schema.tabella"
+            table_name_clean = table_name.strip()
+            search_schema = schema_name
+            search_table = table_name_clean
+            
+            # Se il nome contiene un punto, separa schema e tabella
+            if "." in table_name_clean:
+                parts = table_name_clean.split(".", 1)
+                search_schema = parts[0]
+                search_table = parts[1]
+            
             query = """
             SELECT
-                TABLE_SCHEMA,
-                TABLE_NAME,
-                COLUMN_NAME,
-                DATA_TYPE,
-                CHARACTER_MAXIMUM_LENGTH,
-                IS_NULLABLE,
-                COLUMN_DEFAULT
+                COLUMN_NAME as Colonna,
+                DATA_TYPE as Tipo,
+                IS_NULLABLE as Nullable
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_NAME = :table_name
             """
 
-            # Filtra per schema se specificato
-            if schema_name:
+            # Filtra per schema se specificato (da parametro o estratto dal nome)
+            if search_schema:
                 query += " AND TABLE_SCHEMA = :schema_name"
 
             query += " ORDER BY ORDINAL_POSITION"
@@ -266,9 +273,9 @@ def create_get_schema_tool(agent_name: str, db_uri: Optional[str], schema_name: 
             db = Session()
 
             try:
-                params = {"table_name": table_name.strip()}
-                if schema_name:
-                    params["schema_name"] = schema_name
+                params = {"table_name": search_table}
+                if search_schema:
+                    params["schema_name"] = search_schema
 
                 result = db.execute(
                     text(query),
@@ -290,18 +297,23 @@ def create_get_schema_tool(agent_name: str, db_uri: Optional[str], schema_name: 
 
         else:
             # Caso 2: Lista di tutte le tabelle disponibili
+            # Se schema_name è configurato, mostra SOLO quello schema
+            # Altrimenti limita a 30 risultati per evitare risposte enormi
             query = """
             SELECT DISTINCT
                 TABLE_SCHEMA,
                 TABLE_NAME,
                 TABLE_TYPE
             FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW'
+            WHERE (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW')
             """
 
             # Filtra per schema se specificato
             if schema_name:
                 query += " AND TABLE_SCHEMA = :schema_name"
+            else:
+                # Senza schema configurato, escludi schemi di sistema
+                query += " AND TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest', 'chat_ai')"
 
             query += " ORDER BY TABLE_SCHEMA, TABLE_NAME"
 
@@ -322,7 +334,8 @@ def create_get_schema_tool(agent_name: str, db_uri: Optional[str], schema_name: 
                 if not results:
                     return "Nessuna tabella trovata nello schema specificato."
 
-                return format_results(results, max_rows=100)
+                # Limita a 50 tabelle per evitare risposte troppo lunghe
+                return format_results(results, max_rows=50)
 
             except Exception as e:
                 return f"ERRORE durante il recupero della lista tabelle: {str(e)}"

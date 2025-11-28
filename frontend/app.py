@@ -5,8 +5,6 @@ This application provides a user-friendly chat interface for interacting
 with AI agents that can query different database schemas.
 """
 import os
-import csv
-import io
 import streamlit as st
 import requests
 import json
@@ -42,76 +40,6 @@ def init_session_state():
     if "active_page" not in st.session_state:
         st.session_state.active_page = "chat"
 
-
-def _extract_markdown_table(text: str) -> Optional[List[Dict[str, str]]]:
-    lines = text.splitlines()
-    start_index: Optional[int] = None
-
-    for i, line in enumerate(lines):
-        if line.strip().startswith("|") and "|" in line.strip().strip("|"):
-            if i + 1 < len(lines):
-                separator = lines[i + 1].strip()
-                if separator.startswith("|") and set(separator.replace("|", "").strip()) <= set("- :"):
-                    start_index = i
-                    break
-
-    if start_index is None:
-        return None
-
-    header_line = lines[start_index].strip()
-    if start_index + 1 >= len(lines):
-        return None
-
-    data_lines: List[str] = []
-    for j in range(start_index + 2, len(lines)):
-        row = lines[j]
-        if not row.strip().startswith("|"):
-            break
-        data_lines.append(row.strip())
-
-    if not data_lines:
-        return None
-
-    def split_row(row: str) -> List[str]:
-        return [cell.strip() for cell in row.strip().strip("|").split("|")]
-
-    headers = split_row(header_line)
-    if not headers:
-        return None
-
-    rows: List[Dict[str, str]] = []
-    for row_line in data_lines:
-        cells = split_row(row_line)
-        if len(cells) != len(headers):
-            continue
-        rows.append(dict(zip(headers, cells)))
-
-    if not rows:
-        return None
-
-    return rows
-
-
-def _render_csv_download_from_text(text: str, key_suffix: str) -> None:
-    table = _extract_markdown_table(text)
-    if not table:
-        return
-
-    headers = list(table[0].keys())
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(headers)
-    for row in table:
-        writer.writerow([row.get(col, "") for col in headers])
-
-    data = buffer.getvalue().encode("utf-8-sig")
-    st.download_button(
-        "Scarica tabella in CSV",
-        data=data,
-        file_name="risultati_chat.csv",
-        mime="text/csv",
-        key=f"download_csv_{key_suffix}",
-    )
 
 
 def login_page():
@@ -439,14 +367,6 @@ def chat_page():
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-    last_assistant: Optional[Dict[str, str]] = None
-    for msg in reversed(st.session_state.messages):
-        if msg.get("role") == "assistant":
-            last_assistant = msg
-            break
-    if last_assistant and isinstance(last_assistant.get("content"), str):
-        key_suffix = str(st.session_state.get("conversation_id") or "current")
-        _render_csv_download_from_text(last_assistant["content"], key_suffix)
     
     # Chat input (supports auto-rerun from pending_prompt)
     pending_prompt = st.session_state.get("pending_prompt")

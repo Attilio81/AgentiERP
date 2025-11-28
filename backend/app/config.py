@@ -26,7 +26,10 @@ class Settings(BaseSettings):
     # ========================================
     # LLM PROVIDER CONFIGURATION
     # ========================================
-    llm_provider: Literal["anthropic", "openai", "gemini"] = "anthropic"
+    # Provider disponibili: anthropic, openai, gemini, lmstudio
+    llm_provider: Literal["anthropic", "openai", "gemini", "lmstudio"] = "anthropic"
+    # Provider separato per FAQ (opzionale, se vuoi usare LM Studio per FAQ e Claude per agent)
+    faq_provider: Literal["anthropic", "openai", "gemini", "lmstudio"] | None = None
 
     # Anthropic API Configuration
     anthropic_api_key: str | None = None
@@ -51,6 +54,17 @@ class Settings(BaseSettings):
     # Temperature LLM (0.0 = deterministico, 1.0 = creativo)
     # Per analisi SQL si consiglia 0.3-0.5 per risposte più consistenti
     llm_temperature: float = 0.3
+
+    # ========================================
+    # LOCAL LLM (LM Studio / Ollama)
+    # ========================================
+    # Per usare LM Studio: llm_provider = "lmstudio"
+    # Per usare Ollama: llm_provider = "ollama" (futuro)
+    local_llm_url: str = "http://localhost:1234/v1/chat/completions"
+    local_llm_model: str = "qwen2.5-7b-instruct"  # Modello caricato in LM Studio
+    
+    # Modello leggero per riassunti e FAQ (opzionale, se diverso dal principale)
+    local_llm_light_model: str | None = None  # Es: "qwen2-0.5b-instruct"
 
     # ========================================
     # DEBUGGING & OBSERVABILITY

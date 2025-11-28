@@ -3,11 +3,12 @@ Chat routes for agent interactions.
 Includes SSE streaming endpoint and conversation management.
 """
 import json
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import datetime
 from datapizza.core.clients import ClientResponse
 from app.database.database import get_db
@@ -16,6 +17,61 @@ from app.auth.middleware import get_current_user
 from app.agents.manager import get_agent_manager
 from app.config import get_settings
 from app.llm.factory import LLMConfigurationError, build_llm_client
+
+# Configurazione memoria conversazionale
+SLIDING_WINDOW_SIZE = 2  # Ultimi N messaggi da mantenere completi (2 = ultimo scambio)
+
+
+async def summarize_with_local_llm(messages: List[Dict[str, str]]) -> Optional[str]:
+    """
+    Riassume i messaggi vecchi usando LLM locale (LM Studio).
+    Usa la configurazione da settings.
+    Ritorna None se non disponibile.
+    """
+    if not messages:
+        return None
+    
+    settings = get_settings()
+    
+    # Formatta i messaggi per il riassunto
+    text = "\n".join([
+        f"{'Utente' if m['role'] == 'user' else 'Assistente'}: {m['content'][:200]}"
+        for m in messages
+    ])
+    
+    prompt = f"""Riassumi questa conversazione in 2-3 frasi brevissime.
+MANTIENI SOLO: nomi prodotti, codici articolo, fornitori, quantità, numeri chiave.
+ESCLUDI: schemi database, nomi colonne, dettagli tecnici SQL, tabelle complete.
+
+{text}
+
+Riassunto conciso:"""
+
+    # Usa modello leggero se configurato, altrimenti modello principale
+    model = settings.local_llm_light_model or settings.local_llm_model
+    
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # LM Studio (OpenAI-compatibile)
+            response = await client.post(
+                settings.local_llm_url,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 150
+                }
+            )
+            if response.status_code == 200:
+                result = response.json()["choices"][0]["message"]["content"].strip()
+                print(f"[LM Studio] Riassunto ({model}): {result[:100]}...")
+                return result
+            else:
+                print(f"[LM Studio] Errore {response.status_code}: {response.text[:200]}")
+    except Exception as e:
+        print(f"[LM Studio] Non disponibile: {e}")
+    
+    return None
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
@@ -164,103 +220,108 @@ async def chat_stream(
             )
 
             # ========================================
-            # MEMORY: Costruisci cronologia usando Datapizza Memory class
+            # SLIDING WINDOW + RIASSUNTO OLLAMA
             # ========================================
-            # Datapizza Agent supporta conversational memory attraverso la classe Memory.
-            # Creiamo una Memory instance per questa conversazione e la popoliamo
-            # con la cronologia precedente.
-
-            from datapizza.memory import Memory
-            from datapizza.type import ROLE, TextBlock
-
-            # Crea Memory instance per questa conversazione
-            conversation_memory = Memory()
-
-            # Popola memory con cronologia precedente
-            for msg in previous_messages:
-                # Valida ruolo
-                if msg.role not in ("user", "assistant"):
-                    print(f"[WARN] Skipping message with invalid role: {msg.role}")
-                    continue
-
-                # Valida contenuto non vuoto
-                if not msg.content or not msg.content.strip():
-                    print(f"[WARN] Skipping message with empty content")
-                    continue
-
-                # Valida alternanza: controlla se l'ultimo turno ha lo stesso ruolo
-                if len(conversation_memory) > 0:
-                    # Ottieni ultimo turno e verifica ruolo
-                    # Memory.__len__ ritorna il numero di turni
-                    # Evitiamo di aggiungere due turni consecutivi dello stesso ruolo
-                    last_turn_blocks = conversation_memory[-1]
-                    if last_turn_blocks:
-                        # Assumiamo che tutti i blocchi in un turno abbiano lo stesso ruolo
-                        # Per semplicità, saltiamo se il ruolo corrisponde al precedente
-                        prev_role = "assistant" if msg.role == "user" else "user"
-                        # Nota: questa è una semplificazione, idealmente dovremmo controllare
-                        # il ruolo effettivo dell'ultimo turno, ma Memory non espone facilmente questa info
-
-                # Aggiungi turno alla Memory
-                role = ROLE.USER if msg.role == "user" else ROLE.ASSISTANT
-                try:
-                    conversation_memory.add_turn(
-                        TextBlock(content=msg.content),
-                        role=role
-                    )
-                except Exception as e:
-                    print(f"[ERROR] Failed to add turn to memory: {e}")
-                    continue
-
-            # Log della dimensione dello storico (per debugging)
-            print(f"[chat_stream] Conversation {conversation.id}: {len(conversation_memory)} previous turns in memory")
-
-            # ========================================
-            # AGENT EXECUTION CON MEMORY
-            # ========================================
-            # Esegui l'agente passando:
-            # - Il nuovo messaggio utente
-            # - Lo storico conversazione (messages=history) per la memory
-            #
-            # NOTA: Datapizza Agent usa 'messages' per il contesto conversazionale.
-            # Questo permette all'agente di:
-            # - Fare riferimento a query precedenti
-            # - Continuare analisi multi-step
-            # - Mantenere coerenza nelle risposte
-            #
-            # IMPORTANTE: Se non c'è cronologia (lista vuota), non passiamo il parametro
-            # 'messages' per evitare errori "at least one message is required" dall'API LLM.
-
-            # Esegui agente con Memory
-            # IMPORTANTE: Non passare memory come parametro a a_run() (causa "multiple values" error)
-            # Invece, imposta agent.memory prima della chiamata
-            try:
-                if len(conversation_memory) > 0:
-                    # C'è cronologia: imposta memory nell'agent
-                    print(f"[chat_stream] Setting agent memory with {len(conversation_memory)} turns")
-                    agent.memory = conversation_memory
-                    result = await agent.a_run(request.message)
+            # Con stateless=True, gestiamo la memoria esternamente:
+            # 1. Messaggi vecchi → Riassunto con Ollama (se disponibile)
+            # 2. Ultimi N messaggi → Completi nel contesto
+            # 3. Messaggio attuale → Domanda dell'utente
+            
+            # Converti messaggi DB in lista dict
+            all_messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in previous_messages
+            ]
+            
+            # Costruisci contesto ottimizzato
+            context_parts = []
+            
+            if len(all_messages) > SLIDING_WINDOW_SIZE:
+                # Messaggi vecchi da riassumere
+                old_messages = all_messages[:-SLIDING_WINDOW_SIZE]
+                recent_messages = all_messages[-SLIDING_WINDOW_SIZE:]
+                
+                # Prova a riassumere con LLM locale (LM Studio o Ollama)
+                summary = await summarize_with_local_llm(old_messages)
+                if summary:
+                    context_parts.append(f"RIASSUNTO CONVERSAZIONE PRECEDENTE:\n{summary}")
                 else:
-                    # Nessuna cronologia: azzera memory (se esiste)
-                    print("[chat_stream] Executing agent without memory (first message)")
-                    if hasattr(agent, 'memory'):
-                        agent.memory = Memory()  # Reset memory for new conversation
-                    result = await agent.a_run(request.message)
+                    # Fallback: tronca messaggi vecchi
+                    for msg in old_messages[-2:]:  # Solo ultimi 2 dei vecchi
+                        role = "UTENTE" if msg["role"] == "user" else "ASSISTENTE"
+                        content = msg["content"][:150] + "..." if len(msg["content"]) > 150 else msg["content"]
+                        context_parts.append(f"{role}: {content}")
+                
+                # Aggiungi messaggi recenti completi
+                context_parts.append("\nULTIMI MESSAGGI:")
+                for msg in recent_messages:
+                    role = "UTENTE" if msg["role"] == "user" else "ASSISTENTE"
+                    content = msg["content"][:500] + "..." if len(msg["content"]) > 500 else msg["content"]
+                    context_parts.append(f"{role}: {content}")
+            else:
+                # Pochi messaggi: includi tutti
+                for msg in all_messages:
+                    role = "UTENTE" if msg["role"] == "user" else "ASSISTENTE"
+                    content = msg["content"][:500] + "..." if len(msg["content"]) > 500 else msg["content"]
+                    context_parts.append(f"{role}: {content}")
+            
+            # Costruisci messaggio augmented
+            if context_parts:
+                context_str = "\n".join(context_parts)
+                augmented_message = f"""CONTESTO CONVERSAZIONE:
+{context_str}
+
+DOMANDA ATTUALE:
+{request.message}"""
+                print(f"[chat_stream] Context: {len(all_messages)} msgs, sliding window applied")
+            else:
+                augmented_message = request.message
+                print(f"[chat_stream] No context (first message)")
+            
+            # Esegui agent
+            print(f"[chat_stream] Executing agent...")
+            try:
+                result = await agent.a_run(augmented_message)
             except Exception as e:
-                # Fallback completo
                 print(f"[chat_stream] ERROR during agent execution: {e}")
-                print("[chat_stream] Falling back to execution without memory")
-                if hasattr(agent, 'memory'):
-                    agent.memory = None
-                result = await agent.a_run(request.message)
+                import traceback
+                traceback.print_exc()
+                raise
 
             # Extract full response text
-            if hasattr(result, "text") and getattr(result, "text", None):
+            if hasattr(result, "text") and result.text:
                 full_response = result.text
             elif isinstance(result, str):
                 full_response = result
             else:
                 full_response = str(result) if result is not None else ""
+            
+            # Rimuovi i JSON dei tool_call/tool_result dalla risposta (se presenti)
+            # Questi non devono essere mostrati all'utente
+            def clean_tool_json(text: str) -> str:
+                """Rimuove le righe che contengono JSON di tool_call o tool_result."""
+                lines = text.split('\n')
+                cleaned_lines = []
+                for line in lines:
+                    stripped = line.strip()
+                    # Salta righe che sono JSON di tool calls
+                    if stripped.startswith('{"type":') and ('"tool_call"' in stripped or '"tool_result"' in stripped):
+                        continue
+                    cleaned_lines.append(line)
+                return '\n'.join(cleaned_lines)
+            
+            full_response = clean_tool_json(full_response)
+            # Rimuovi linee vuote multiple
+            import re
+            full_response = re.sub(r'\n{3,}', '\n\n', full_response).strip()
+
+            # Token usage tracking
+            if hasattr(result, "usage") and result.usage:
+                usage = result.usage
+                prompt_tokens = getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
+                completion_tokens = getattr(usage, "completion_tokens", 0) or getattr(usage, "output_tokens", 0) or 0
+                total_tokens = prompt_tokens + completion_tokens
+                print(f"[TOKENS] Prompt: {prompt_tokens}, Completion: {completion_tokens}, Total: {total_tokens}")
 
             # Debug: log generated response (truncated)
             print("[chat_stream] full_response length:", len(full_response))

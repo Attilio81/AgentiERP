@@ -101,7 +101,12 @@ def build_llm_client(
         >>> client = build_llm_client(settings, use_case="agent")
         >>> response = client.invoke("Analizza le vendite 2025")
     """
-    provider = (settings.llm_provider or "anthropic").lower()
+    # Usa faq_provider se configurato e use_case è "faq"
+    if use_case == "faq" and settings.faq_provider:
+        provider = settings.faq_provider.lower()
+    else:
+        provider = (settings.llm_provider or "anthropic").lower()
+    
     model_name = _resolve_model(settings, use_case, model_override)
 
     # ========================================
@@ -157,6 +162,34 @@ def build_llm_client(
             model=model_name,
         )
 
+    # ========================================
+    # LM STUDIO (OpenAI-compatibile locale)
+    # ========================================
+    if provider == "lmstudio":
+        try:
+            from datapizza.clients.openai import OpenAIClient  # type: ignore
+        except ImportError as exc:  # pragma: no cover - informative error
+            raise LLMConfigurationError(
+                "Client OpenAI non disponibile. Installa 'datapizza-ai-clients-openai'."
+            ) from exc
+
+        # Estrai base URL da local_llm_url (rimuovi /chat/completions)
+        base_url = settings.local_llm_url.replace("/v1/chat/completions", "/v1").replace("/chat/completions", "/v1")
+        
+        # Usa modello leggero per FAQ, altrimenti modello principale
+        if use_case == "faq" and settings.local_llm_light_model:
+            local_model = settings.local_llm_light_model
+        else:
+            local_model = settings.local_llm_model
+        
+        print(f"[LM Studio] Connessione a {base_url} con modello {local_model}")
+        
+        return OpenAIClient(
+            api_key="lm-studio",  # LM Studio non richiede API key reale
+            model=local_model,
+            base_url=base_url,
+        )
+
     raise LLMConfigurationError(
-        f"Provider LLM '{provider}' non supportato. Usa anthropic, openai o gemini."
+        f"Provider LLM '{provider}' non supportato. Usa anthropic, openai, gemini o lmstudio."
     )

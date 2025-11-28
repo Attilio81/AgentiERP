@@ -76,9 +76,11 @@ Permette a utenti business di porre domande in italiano su dati aziendali, otten
 - **Database**: SQL Server (schema applicativo `chat_ai` + schemi di dominio personalizzati)
 - **Autenticazione**: Session-based, password hashate con `passlib[bcrypt]`
 - **AI**:
-  - Provider selezionabile via `LLM_PROVIDER` (`anthropic`, `openai`, `gemini`)
-  - Modello principale: `AGENT_MODEL` (es. Claude Sonnet 4.5 / GPT‑4.1 / Gemini 1.5 Pro)
-  - Modello FAQ: `FAQ_MODEL` (es. Claude Haiku 4.5 / GPT‑4.1 mini / Gemini 1.5 Flash)
+  - Provider principale configurabile via `LLM_PROVIDER` (`anthropic`, `openai`, `gemini`, `lmstudio`)
+  - Modello principale agent: `AGENT_MODEL` (es. Claude Sonnet 4.5 / GPT‑4.1 / Gemini 1.5 Pro)
+  - Provider separato per FAQ/riassunti via `FAQ_PROVIDER` (es. `lmstudio` per modello locale leggero)
+  - Modello FAQ: `FAQ_MODEL` (se si usa provider cloud per le FAQ)
+  - Supporto LLM locale (LM Studio) con `LOCAL_LLM_URL`, `LOCAL_LLM_MODEL` e `LOCAL_LLM_LIGHT_MODEL`
 - **Retry Logic**: Gestione automatica errori 529 Overloaded di Anthropic con backoff esponenziale
 
 ---
@@ -307,26 +309,40 @@ copy .env.example .env
 copy .env backend\.env   # pydantic-settings legge .env dalla cartella backend
 ```
 
-Apri `.env` e imposta i valori:
+Apri `.env` e imposta i valori principali:
 
 ```env
+# Database
 DATABASE_URL=mssql+pyodbc://user:password@server:1433/database?driver=ODBC+Driver+18+for+SQL+Server
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-your-api-key-here
-OPENAI_API_KEY=sk-openai-your-api-key-here
-GEMINI_API_KEY=sk-gemini-your-api-key-here
 
+# Agent principale (query SQL e analisi)
+LLM_PROVIDER=anthropic                    # anthropic | openai | gemini | lmstudio
+AGENT_MODEL=claude-sonnet-4-5-20250929
+
+# FAQ e riassunti (modello leggero)
+FAQ_PROVIDER=lmstudio                     # opzionale, può differire da LLM_PROVIDER
+FAQ_MODEL=claude-3-5-haiku-20241022       # usato solo se FAQ_PROVIDER è cloud
+
+# LM Studio locale (usato se LLM_PROVIDER=lmstudio o FAQ_PROVIDER=lmstudio)
+LOCAL_LLM_URL=http://localhost:1234/v1/chat/completions
+LOCAL_LLM_MODEL=qwen2.5-7b-instruct       # modello principale (se usato per l'agent)
+LOCAL_LLM_LIGHT_MODEL=qwen2-0.5b-instruct # modello leggero per FAQ/riassunti
+
+# API keys cloud (inserisci solo quelle che usi)
+ANTHROPIC_API_KEY=sk-ant-your-api-key-here
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+
+# Sicurezza e sessioni
 SECRET_KEY=your-secret-key-here-minimum-32-characters
 SESSION_EXPIRE_HOURS=24
-
-AGENT_MODEL=claude-sonnet-4-5-20250929
-FAQ_MODEL=claude-haiku-4-5-20250929
 
 # Debugging & Observability
 # ENABLE_LLM_TRACING: Se True, logga tutti gli input/output delle chiamate LLM
 # ATTENZIONE: Genera log molto grandi! Utile per debugging ma disabilitare in produzione
 ENABLE_LLM_TRACING=False
 
+# URLs frontend/backend
 BACKEND_URL=http://localhost:8000
 FRONTEND_URL=http://localhost:8501
 ```
@@ -720,23 +736,53 @@ Per problemi o domande:
 
 ### 🆕 Miglioramenti Fase 1 (Nov 2025)
 
-#### Memory Conversazionale
+#### Memory Conversazionale (sliding window + LLM locale)
 
-Gli agenti ora mantengono il **contesto** delle conversazioni precedenti:
+La memoria conversazionale è ora gestita **per conversazione** nel backend, con:
+- **sliding window** sugli ultimi messaggi
+- **riassunto automatico** dei messaggi più vecchi tramite LLM locale (LM Studio)
 
 ```python
 # backend/app/chat/routes.py
-# Recupera cronologia dal database
-previous_messages = db.query(Message).filter(...).all()
 
-# Costruisci lista messaggi
-history = [{"role": msg.role, "content": msg.content} for msg in previous_messages]
+SLIDING_WINDOW_SIZE = 2  # ultimi N messaggi da mantenere completi
 
-# Passa all'agente con memory
-result = await agent.a_run(request.message, messages=history)
+# 1) Recupera cronologia dal database per la conversazione corrente
+previous_messages = (
+    db.query(Message)
+    .filter(Message.conversation_id == conversation_id)
+    .order_by(Message.created_at)
+    .all()
+)
+
+all_messages = [
+    {"role": msg.role, "content": msg.content}
+    for msg in previous_messages
+]
+
+if len(all_messages) > SLIDING_WINDOW_SIZE:
+    old_messages = all_messages[:-SLIDING_WINDOW_SIZE]
+    recent_messages = all_messages[-SLIDING_WINDOW_SIZE:]
+
+    # Riassunto vecchi messaggi con LLM locale (LM Studio)
+    summary = await summarize_with_local_llm(old_messages)
+
+    # Costruzione stringa di contesto + ultimi messaggi
+    context_str = build_context_string(summary, recent_messages)
+    augmented_message = f"""CONTESTO CONVERSAZIONE:\n{context_str}\n\nDOMANDA ATTUALE:\n{request.message}"""
+else:
+    # Conversazione breve: uso diretto dei messaggi
+    context_str = build_context_string(None, all_messages)
+    augmented_message = f"""CONTESTO CONVERSAZIONE:\n{context_str}\n\nDOMANDA ATTUALE:\n{request.message}"""
+
+# 2) Esegue l'agente (stateless) con il messaggio già contestualizzato
+result = await agent.a_run(augmented_message)
 ```
 
-**Beneficio**: Conversazioni multi-step naturali come "Vendite Q1?" → "E Q2?" → "Quale migliore?"
+**Benefici principali**:
+- ✅ **Memoria isolata per conversazione/utente** (nessuna condivisione tra utenti)
+- ✅ **Controllo dei token** grazie ai riassunti automatici con modello locale leggero
+- ✅ **Conversazioni multi-step naturali** ("Vendite Q1?" → "E Q2?" → "Quale migliore?") anche su storici lunghi
 
 #### Schema Discovery Tool
 

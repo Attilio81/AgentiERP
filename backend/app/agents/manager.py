@@ -135,7 +135,12 @@ class AgentManager:
                 # orientato ai risultati, non al piano di azione.
                 response_suffix = (
                     "\n\n"  # separatore sicuro
-                    "REGOLE GENERALI PER LA RISPOSTA FINALE:\n"
+                    "REGOLE PER QUERY SQL:\n"
+                    "- PRIMA di eseguire qualsiasi query SQL, usa SEMPRE get_schema per verificare i nomi esatti delle colonne.\n"
+                    "- NON indovinare i nomi delle colonne: usa SOLO quelli restituiti da get_schema.\n"
+                    "- Se get_schema non trova la tabella, prova con il formato 'schema.tabella' (es: magazzino.articoli).\n"
+                    "\n"
+                    "REGOLE PER LA RISPOSTA FINALE:\n"
                     "- Dopo aver usato i tools, parla come se l'analisi fosse già stata eseguita.\n"
                     "- NON usare frasi come 'analizzerò', 'vado a verificare', 'interrogherò i dati'.\n"
                     "- Riassumi sempre cosa mostrano i risultati delle query, citando almeno 1-2 numeri o valori chiave.\n"
@@ -167,20 +172,15 @@ class AgentManager:
                 # Non serve una Memory esplicita qui, ma la gestiamo passando lo storico
                 # nel chat/routes.py quando chiamiamo agent.a_run()
 
+                # stateless=True: ogni chiamata è indipendente
+                # La memoria viene gestita esternamente in routes.py
+                # con sliding window + riassunto Ollama
                 self.agents[db_agent.name] = Agent(
                     name=db_agent.name,
                     client=agent_client,
                     system_prompt=system_prompt,
                     tools=tools,
-                    # NOTA IMPORTANTE SULLA MEMORY:
-                    # Datapizza Agent supporta memory conversazionale tramite il parametro
-                    # 'messages' nella chiamata .run() o .a_run().
-                    # Non serve un oggetto Memory separato - la storia viene passata
-                    # direttamente come lista di messaggi dal chiamante (chat/routes.py).
-                    #
-                    # Esempio di uso in chat/routes.py:
-                    # history = [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-                    # result = await agent.a_run(new_message, messages=history)
+                    stateless=True,
                 )
 
                 print(f"[AgentManager] Agente '{db_agent.name}' inizializzato con {len(tools)} tools")
