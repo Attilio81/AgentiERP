@@ -34,10 +34,7 @@ def validate_sql_query(query: str) -> tuple[bool, str]:
     query_clean = re.sub(r'/\*.*?\*/', '', query_clean, flags=re.DOTALL)
     query_clean = query_clean.strip().upper()
     
-    # Check if query starts with SELECT
-    if not query_clean.startswith('SELECT'):
-        return False, "Solo query SELECT sono permesse. Non puoi modificare i dati."
-    
+
     # Check for dangerous keywords
     dangerous_keywords = [
         'DROP', 'DELETE', 'INSERT', 'UPDATE', 'ALTER', 'CREATE',

@@ -134,17 +134,23 @@ class AgentManager:
                 # Suffix generico per tutti gli agenti: impone uno stile di risposta finale
                 # orientato ai risultati, non al piano di azione.
                 response_suffix = (
-                    "\n\n"  # separatore sicuro
-                    "REGOLE PER QUERY SQL:\n"
-                    "- PRIMA di eseguire qualsiasi query SQL, usa SEMPRE get_schema per verificare i nomi esatti delle colonne.\n"
-                    "- NON indovinare i nomi delle colonne: usa SOLO quelli restituiti da get_schema.\n"
-                    "- Se get_schema non trova la tabella, prova con il formato 'schema.tabella' (es: magazzino.articoli).\n"
+                    "\n\n"
+                    "WORKFLOW OBBLIGATORIO:\n"
+                    "1. USA get_schema per verificare struttura tabelle\n"
+                    "2. ESEGUI sql_select con la query appropriata\n"
+                    "3. SOLO DOPO aver ricevuto i risultati, rispondi all'utente\n"
                     "\n"
-                    "REGOLE PER LA RISPOSTA FINALE:\n"
-                    "- Dopo aver usato i tools, parla come se l'analisi fosse già stata eseguita.\n"
-                    "- NON usare frasi come 'analizzerò', 'vado a verificare', 'interrogherò i dati'.\n"
-                    "- Riassumi sempre cosa mostrano i risultati delle query, citando almeno 1-2 numeri o valori chiave.\n"
-                    "- Quando viene richiesto un TOP N, mostra TUTTI gli N elementi in formato tabella.\n"
+                    "NON rispondere MAI senza aver prima eseguito sql_select.\n"
+                    "NON annunciare cosa farai - FALLO e basta.\n"
+                    "\n"
+                    "Per query complesse (es. 'tra i top N, chi NON ha fatto X'):\n"
+                    "- Usa CTE (WITH ... AS) o subquery\n"
+                    "- Esempio: WITH TopN AS (SELECT TOP 50 ... GROUP BY ... ORDER BY ... DESC) "
+                    "SELECT * FROM TopN WHERE CodiceCliente NOT IN (SELECT CodiceCliente FROM ... WHERE ...)\n"
+                    "\n"
+                    "REGOLE SCHEMA:\n"
+                    "- PRIMA di qualsiasi query, usa get_schema per verificare nomi colonne esatti\n"
+                    "- Se tabella non trovata, prova formato 'schema.tabella'\n"
                 )
 
                 system_prompt = f"{base_prompt}{response_suffix}" if base_prompt else response_suffix
